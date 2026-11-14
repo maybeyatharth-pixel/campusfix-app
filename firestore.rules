@@ -1,0 +1,277 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global safety net: deny everything by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Core helper primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isBootstrappedAdmin() {
+      return isVerified() && request.auth.token.email == 'maybe.yatharth@gmail.com';
+    }
+
+    function isAdmin() {
+      return isBootstrappedAdmin() || (isVerified() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
+    }
+
+    // Entity validators
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['uid', 'displayName', 'role', 'themePreference', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'displayName', 'role', 'department', 'themePreference', 'createdAt', 'updatedAt'])
+        && isValidId(data.uid)
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80
+        && data.role in ['student', 'admin']
+        && (!('department' in data) || (data.department is string && data.department.size() <= 80))
+        && data.themePreference in ['light', 'dark', 'system']
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidUserPrivateInfo(data) {
+      return data.keys().hasAll(['uid', 'email', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'email', 'updatedAt'])
+        && isValidId(data.uid)
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 160
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidAdminRecord(data) {
+      return data.keys().hasAll(['uid', 'email', 'grantedAt'])
+        && data.keys().hasOnly(['uid', 'email', 'grantedAt'])
+        && isValidId(data.uid)
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 160
+        && data.grantedAt is timestamp;
+    }
+
+    function isValidCategory(val) {
+      return val in ['Electrical', 'Water', 'Internet', 'Cleanliness', 'Safety', 'Food'];
+    }
+
+    function isValidPriority(val) {
+      return val in ['High', 'Medium', 'Low'];
+    }
+
+    function isValidStatus(val) {
+      return val in ['Submitted', 'Assigned', 'In Progress', 'Resolved'];
+    }
+
+    function isValidComplaint(data) {
+      return data.keys().hasAll([
+          'id', 'ticketCode', 'reporterId', 'reporterName', 'location',
+          'description', 'category', 'priority', 'triageReason', 'status',
+          'latestNote', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'ticketCode', 'reporterId', 'reporterName', 'location',
+          'description', 'category', 'priority', 'triageReason', 'status',
+          'latestNote', 'photoDataUrl', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.id)
+        && data.ticketCode is string && data.ticketCode.size() >= 7 && data.ticketCode.size() <= 16 && data.ticketCode.matches('^CF-[0-9]{4,8}$')
+        && isValidId(data.reporterId)
+        && data.reporterName is string && data.reporterName.size() >= 1 && data.reporterName.size() <= 80
+        && data.location is string && data.location.size() >= 2 && data.location.size() <= 120
+        && data.description is string && data.description.size() >= 5 && data.description.size() <= 2000
+        && isValidCategory(data.category)
+        && isValidPriority(data.priority)
+        && data.triageReason is string && data.triageReason.size() >= 1 && data.triageReason.size() <= 300
+        && isValidStatus(data.status)
+        && data.latestNote is string && data.latestNote.size() >= 1 && data.latestNote.size() <= 500
+        && (!('photoDataUrl' in data) || (data.photoDataUrl is string && data.photoDataUrl.size() <= 350000))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidTimelineEvent(data) {
+      return data.keys().hasAll([
+          'id', 'complaintId', 'reporterId', 'status', 'note',
+          'actorId', 'actorName', 'actorRole', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'complaintId', 'reporterId', 'status', 'note',
+          'actorId', 'actorName', 'actorRole', 'createdAt'
+        ])
+        && isValidId(data.id)
+        && isValidId(data.complaintId)
+        && isValidId(data.reporterId)
+        && isValidStatus(data.status)
+        && data.note is string && data.note.size() >= 1 && data.note.size() <= 500
+        && isValidId(data.actorId)
+        && data.actorName is string && data.actorName.size() >= 1 && data.actorName.size() <= 80
+        && data.actorRole in ['student', 'admin']
+        && data.createdAt is timestamp;
+    }
+
+    // Users public-safe profile
+    match /users/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin();
+
+      allow create: if isVerified()
+        && isValidId(userId)
+        && isOwner(userId)
+        && isValidUserProfile(incoming())
+        && incoming().uid == userId
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && (incoming().role == 'student' || isBootstrappedAdmin());
+
+      allow update: if isVerified()
+        && isValidId(userId)
+        && isValidUserProfile(incoming())
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          (isOwner(userId)
+            && incoming().role == existing().role
+            && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'department', 'themePreference', 'updatedAt']))
+          || (isAdmin()
+            && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'department', 'role', 'themePreference', 'updatedAt']))
+        );
+
+      allow delete: if false;
+
+      // Private PII subcollection
+      match /private/{docId} {
+        allow get: if isValidId(userId) && isValidId(docId) && docId == 'info' && (isOwner(userId) || isAdmin());
+        allow list: if false;
+
+        allow create: if isVerified()
+          && isValidId(userId)
+          && isValidId(docId)
+          && docId == 'info'
+          && isOwner(userId)
+          && isValidUserPrivateInfo(incoming())
+          && incoming().uid == userId
+          && incoming().updatedAt == request.time;
+
+        allow update: if isVerified()
+          && isValidId(userId)
+          && isValidId(docId)
+          && docId == 'info'
+          && isOwner(userId)
+          && isValidUserPrivateInfo(incoming())
+          && incoming().uid == existing().uid
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['email', 'updatedAt']);
+
+        allow delete: if false;
+      }
+    }
+
+    // Admins registry
+    match /admins/{adminId} {
+      allow get: if isValidId(adminId) && (isOwner(adminId) || isAdmin());
+      allow list: if isAdmin();
+
+      allow create: if isVerified()
+        && isValidId(adminId)
+        && isValidAdminRecord(incoming())
+        && incoming().uid == adminId
+        && incoming().grantedAt == request.time
+        && (isBootstrappedAdmin() || isAdmin());
+
+      allow update: if false;
+      allow delete: if isBootstrappedAdmin() && isValidId(adminId) && adminId != request.auth.uid;
+    }
+
+    // Complaints collection
+    match /complaints/{complaintId} {
+      allow get: if isValidId(complaintId) && isSignedIn() && (isAdmin() || (resource != null && existing().reporterId == request.auth.uid));
+      allow list: if isSignedIn() && (isAdmin() || existing().reporterId == request.auth.uid);
+
+      allow create: if isVerified()
+        && isValidId(complaintId)
+        && isValidComplaint(incoming())
+        && incoming().id == complaintId
+        && incoming().reporterId == request.auth.uid
+        && incoming().status == 'Submitted'
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerified()
+        && isValidId(complaintId)
+        && isValidComplaint(incoming())
+        && incoming().id == existing().id
+        && incoming().ticketCode == existing().ticketCode
+        && incoming().reporterId == existing().reporterId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          // Tier 1: Admin triage / status transition with note
+          (isAdmin()
+            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'latestNote', 'priority', 'category', 'updatedAt']))
+          // Tier 2: Student reporter can edit location/description only while Submitted
+          || (existing().reporterId == request.auth.uid
+            && existing().status == 'Submitted'
+            && incoming().status == 'Submitted'
+            && incoming().diff(existing()).affectedKeys().hasOnly(['location', 'description', 'updatedAt']))
+        );
+
+      allow delete: if false;
+
+      // Append-only timeline subcollection (supports atomic writeBatch via existsAfter/getAfter)
+      match /timeline/{eventId} {
+        allow get: if isValidId(complaintId)
+          && isValidId(eventId)
+          && isSignedIn()
+          && (
+            isAdmin()
+            || get(/databases/$(database)/documents/complaints/$(complaintId)).data.reporterId == request.auth.uid
+          );
+
+        // Cost-optimized list: uses denormalized immutable reporterId
+        allow list: if isSignedIn() && (isAdmin() || existing().reporterId == request.auth.uid);
+
+        allow create: if isVerified()
+          && isValidId(complaintId)
+          && isValidId(eventId)
+          && isValidTimelineEvent(incoming())
+          && incoming().id == eventId
+          && incoming().complaintId == complaintId
+          && incoming().actorId == request.auth.uid
+          && incoming().createdAt == request.time
+          && existsAfter(/databases/$(database)/documents/complaints/$(complaintId))
+          && incoming().reporterId == getAfter(/databases/$(database)/documents/complaints/$(complaintId)).data.reporterId
+          && (
+            (isAdmin() && incoming().actorRole == 'admin')
+            || (
+              getAfter(/databases/$(database)/documents/complaints/$(complaintId)).data.reporterId == request.auth.uid
+              && incoming().actorRole == 'student'
+              && incoming().status == 'Submitted'
+            )
+          );
+
+        allow update: if false;
+        allow delete: if false;
+      }
+    }
+  }
+}

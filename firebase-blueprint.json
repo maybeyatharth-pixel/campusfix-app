@@ -1,0 +1,286 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Public-safe CampusFix user profile without PII.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128,
+          "description": "Firebase Auth UID of the user."
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "Display name shown in UI and timeline."
+        },
+        "role": {
+          "type": "string",
+          "enum": ["student", "admin"],
+          "description": "Application role."
+        },
+        "department": {
+          "type": "string",
+          "maxLength": 80,
+          "description": "Campus hostel, department, or facility unit."
+        },
+        "themePreference": {
+          "type": "string",
+          "enum": ["light", "dark", "system"],
+          "description": "User interface color theme preference."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of account creation."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last profile update."
+        }
+      },
+      "required": ["uid", "displayName", "role", "themePreference", "createdAt", "updatedAt"]
+    },
+    "UserPrivateInfo": {
+      "title": "UserPrivateInfo",
+      "description": "Isolated PII record for a user.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128,
+          "description": "Firebase Auth UID of the user."
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 160,
+          "description": "Verified email address."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of update."
+        }
+      },
+      "required": ["uid", "email", "updatedAt"]
+    },
+    "AdminRecord": {
+      "title": "AdminRecord",
+      "description": "Registry document marking an authorized campus admin.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128,
+          "description": "Admin Firebase Auth UID."
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 160,
+          "description": "Admin email address."
+        },
+        "grantedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when admin access was recorded."
+        }
+      },
+      "required": ["uid", "email", "grantedAt"]
+    },
+    "Complaint": {
+      "title": "Complaint",
+      "description": "Campus maintenance or safety complaint submitted by a student.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128,
+          "description": "Complaint document ID."
+        },
+        "ticketCode": {
+          "type": "string",
+          "pattern": "^CF-[0-9]{4,8}$",
+          "maxLength": 16,
+          "description": "Human-readable ticket identifier."
+        },
+        "reporterId": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128,
+          "description": "Firebase Auth UID of the submitting student."
+        },
+        "reporterName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "Display name of the submitting student."
+        },
+        "location": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120,
+          "description": "Campus building, room, or area where the problem occurred."
+        },
+        "description": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 2000,
+          "description": "Detailed description of the campus issue."
+        },
+        "category": {
+          "type": "string",
+          "enum": ["Electrical", "Water", "Internet", "Cleanliness", "Safety", "Food"],
+          "description": "Auto-assigned complaint category."
+        },
+        "priority": {
+          "type": "string",
+          "enum": ["High", "Medium", "Low"],
+          "description": "Auto-assigned severity priority."
+        },
+        "triageReason": {
+          "type": "string",
+          "maxLength": 300,
+          "description": "Short automated explanation for category and priority."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["Submitted", "Assigned", "In Progress", "Resolved"],
+          "description": "Current resolution lifecycle stage."
+        },
+        "latestNote": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Most recent admin or system status note."
+        },
+        "photoDataUrl": {
+          "type": "string",
+          "maxLength": 350000,
+          "description": "Optional compressed JPEG photo data URL."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when complaint was submitted."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of latest update."
+        }
+      },
+      "required": [
+        "id",
+        "ticketCode",
+        "reporterId",
+        "reporterName",
+        "location",
+        "description",
+        "category",
+        "priority",
+        "triageReason",
+        "status",
+        "latestNote",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "TimelineEvent": {
+      "title": "TimelineEvent",
+      "description": "Immutable status transition event in a complaint's audit timeline.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128,
+          "description": "Timeline event document ID."
+        },
+        "complaintId": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128,
+          "description": "Parent complaint ID."
+        },
+        "reporterId": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128,
+          "description": "Original complaint reporter UID for secure list queries."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["Submitted", "Assigned", "In Progress", "Resolved"],
+          "description": "Status recorded at this timeline step."
+        },
+        "note": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "Update note accompanying the status transition."
+        },
+        "actorId": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128,
+          "description": "UID of the user or admin who created the event."
+        },
+        "actorName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "Display name of the actor."
+        },
+        "actorRole": {
+          "type": "string",
+          "enum": ["student", "admin"],
+          "description": "Role of the actor."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the timeline event."
+        }
+      },
+      "required": [
+        "id",
+        "complaintId",
+        "reporterId",
+        "status",
+        "note",
+        "actorId",
+        "actorName",
+        "actorRole",
+        "createdAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Public-safe user profile documents."
+    },
+    "/users/{userId}/private/{docId}": {
+      "schema": { "$ref": "#/entities/UserPrivateInfo" },
+      "description": "Private PII subcollection isolated per user."
+    },
+    "/admins/{adminId}": {
+      "schema": { "$ref": "#/entities/AdminRecord" },
+      "description": "Authorized campus administrator documents."
+    },
+    "/complaints/{complaintId}": {
+      "schema": { "$ref": "#/entities/Complaint" },
+      "description": "CampusFix student complaint documents."
+    },
+    "/complaints/{complaintId}/timeline/{eventId}": {
+      "schema": { "$ref": "#/entities/TimelineEvent" },
+      "description": "Append-only status timeline events for each complaint."
+    }
+  }
+}

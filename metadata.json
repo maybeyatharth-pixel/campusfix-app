@@ -1,0 +1,8 @@
+{
+  "name": "CampusFix",
+  "description": "Mobile-first campus issue reporting and maintenance triage portal with automated categorisation, real-time tracking, and admin analytics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
