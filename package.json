@@ -1,13 +1,21 @@
 {
   "name": "campusfix",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Mobile-First Campus Problem Reporting & Facilities Resolution Platform",
+  "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "test": "node test-server.js"
   },
-  "keywords": [],
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "keywords": [
+    "campus",
+    "maintenance",
+    "mobile-first",
+    "sqlite"
+  ],
   "author": "",
   "license": "ISC",
   "type": "commonjs"

@@ -1,16 +1,156 @@
 // CampusFix - Mobile-First Campus Problem Reporting Platform
-// High-performance backend using Node.js built-in HTTP and SQLite (node:sqlite)
+// High-performance backend using Node.js built-in HTTP and SQLite (node:sqlite) with universal fallback
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
-const { DatabaseSync } = require('node:sqlite');
 
 const PORT = process.env.PORT || 3000;
 const DB_FILE = path.join(__dirname, 'campusfix.db');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
-// Initialize SQLite database
-const db = new DatabaseSync(DB_FILE);
+// Universal persistent database adapter (supports SQLite or persistent JSON if on older Node)
+let db;
+try {
+  const { DatabaseSync } = require('node:sqlite');
+  db = new DatabaseSync(DB_FILE);
+  console.log('Using native SQLite engine');
+} catch (e) {
+  console.warn('node:sqlite unavailable, using persistent JSON database fallback');
+  db = createUniversalStore(path.join(__dirname, 'campusfix_store.json'));
+}
+
+function createUniversalStore(filePath) {
+  let data = { complaints: [], timeline_events: [], feedback: [] };
+  if (fs.existsSync(filePath)) {
+    try {
+      data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+      if (!data.complaints) data.complaints = [];
+      if (!data.timeline_events) data.timeline_events = [];
+      if (!data.feedback) data.feedback = [];
+    } catch (err) {}
+  }
+  const save = () => {
+    try {
+      fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+    } catch (err) {}
+  };
+
+  return {
+    exec(sql) {},
+    prepare(sql) {
+      const s = sql.trim();
+      return {
+        get(...params) {
+          if (s.includes('COUNT(*) as count FROM complaints WHERE priority =')) {
+            const p = params[0] || 'High';
+            const count = data.complaints.filter(c => c.priority === p && c.status !== 'Resolved' && c.status !== 'Closed').length;
+            return { count };
+          }
+          if (s.includes('COUNT(*) as count FROM complaints WHERE status =')) {
+            const match = s.match(/status = '([^']+)'/);
+            const status = match ? match[1] : '';
+            const count = data.complaints.filter(c => c.status === status).length;
+            return { count };
+          }
+          if (s.includes('COUNT(*) as count FROM complaints WHERE category =')) {
+            const cat = params[0];
+            const count = data.complaints.filter(c => c.category === cat).length;
+            return { count };
+          }
+          if (s.includes('COUNT(*) as count FROM complaints WHERE priority =')) {
+            const pri = s.includes("'High'") ? 'High' : (s.includes("'Medium'") ? 'Medium' : 'Low');
+            const count = data.complaints.filter(c => c.priority === pri).length;
+            return { count };
+          }
+          if (s.includes('COUNT(*) as count FROM complaints')) {
+            return { count: data.complaints.length };
+          }
+          if (s.includes('SELECT * FROM complaints WHERE id = ?')) {
+            const id = params[0];
+            return data.complaints.find(c => c.id === id) || null;
+          }
+          return null;
+        },
+        all(...params) {
+          if (s.includes('SELECT * FROM timeline_events WHERE complaint_id = ?')) {
+            const cid = params[0];
+            return data.timeline_events.filter(t => t.complaint_id === cid).sort((a,b) => (a.created_at || '').localeCompare(b.created_at || ''));
+          }
+          if (s.includes('SELECT * FROM feedback WHERE complaint_id = ?')) {
+            const cid = params[0];
+            return data.feedback.filter(f => f.complaint_id === cid);
+          }
+          if (s.includes('SELECT * FROM complaints')) {
+            let list = [...data.complaints];
+            list.sort((a,b) => (b.created_at || '').localeCompare(a.created_at || ''));
+            return list;
+          }
+          if (s.includes('SELECT id, title, location, category, priority, status, created_at FROM complaints')) {
+            let list = [...data.complaints];
+            list.sort((a,b) => (b.created_at || '').localeCompare(a.created_at || ''));
+            return list.slice(0, 5);
+          }
+          return [];
+        },
+        run(...params) {
+          if (s.includes('INSERT INTO complaints')) {
+            const [
+              id, title, description, location, category, priority, priority_reason,
+              status, student_name, student_id, student_phone, student_email,
+              photo_url, assigned_to, department, estimated_resolution, created_at, updated_at
+            ] = params;
+            data.complaints.push({
+              id, title, description, location, category, priority, priority_reason,
+              status, student_name, student_id, student_phone, student_email,
+              photo_url, assigned_to, department, estimated_resolution, created_at, updated_at
+            });
+            save();
+            return { changes: 1 };
+          }
+          if (s.includes('INSERT INTO timeline_events')) {
+            const [complaint_id, status, title, note, actor_role, actor_name, created_at] = params;
+            data.timeline_events.push({
+              id: data.timeline_events.length + 1,
+              complaint_id, status, title, note, actor_role, actor_name, created_at
+            });
+            save();
+            return { changes: 1 };
+          }
+          if (s.includes('INSERT INTO feedback')) {
+            const [complaint_id, rating, comment, created_at] = params;
+            data.feedback.push({
+              id: data.feedback.length + 1,
+              complaint_id, rating, comment, created_at
+            });
+            save();
+            return { changes: 1 };
+          }
+          if (s.includes('UPDATE complaints')) {
+            const [newStatus, assigned_to, department, priority, now, id] = params;
+            const c = data.complaints.find(item => item.id === id);
+            if (c) {
+              c.status = newStatus;
+              c.assigned_to = assigned_to;
+              c.department = department;
+              c.priority = priority;
+              c.updated_at = now;
+              save();
+            }
+            return { changes: 1 };
+          }
+          if (s.includes('DELETE FROM feedback')) {
+            data.feedback = [];
+            data.timeline_events = [];
+            data.complaints = [];
+            save();
+            return { changes: 1 };
+          }
+          return { changes: 0 };
+        }
+      };
+    }
+  };
+}
 
 // Setup Database Schema
 function initDatabase() {
@@ -739,8 +879,8 @@ const MIME_TYPES = {
   '.ico': 'image/x-icon'
 };
 
-// HTTP Server
-const server = http.createServer(async (req, res) => {
+// HTTP Server Request Handler
+async function handleRequest(req, res) {
   // CORS & headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, PUT, DELETE, OPTIONS');
@@ -1107,14 +1247,30 @@ const server = http.createServer(async (req, res) => {
     console.error('Server error handling request:', error);
     jsonResponse({ error: error.message || 'Internal Server Error' }, 500);
   }
-});
+}
+
+const server = http.createServer(handleRequest);
 
 // Initialize DB and start server
 initDatabase();
 
-server.listen(PORT, '0.0.0.0', () => {
+const serverPort = parseInt(PORT, 10) || 3000;
+
+server.listen(serverPort, '0.0.0.0', () => {
   console.log(`===============================================`);
-  console.log(`CampusFix Server running at http://localhost:${PORT}`);
+  console.log(`CampusFix Server running on port ${serverPort}`);
   console.log(`Mobile-first web app ready!`);
   console.log(`===============================================`);
 });
+
+// Bind alternate port so Railway routes seamlessly whether target is 8080 or 3000
+const alternatePorts = [8080, 3000].filter(p => p !== serverPort);
+for (const altPort of alternatePorts) {
+  try {
+    const auxServer = http.createServer(handleRequest);
+    auxServer.on('error', () => {});
+    auxServer.listen(altPort, '0.0.0.0', () => {
+      console.log(`Also listening on port ${altPort}`);
+    });
+  } catch (err) {}
+}
