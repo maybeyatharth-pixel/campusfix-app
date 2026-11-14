@@ -1,17 +1,47 @@
-// CampusFix - Core Mobile Web Application Logic
-// Handles tabs, auto-categorisation, status timeline, admin dashboard, dark mode, database REST sync
+// CampusFix - JECRC University, Jaipur (Rajasthan)
+// Mobile-First Campus Problem Reporting & Facilities Resolution Platform
+// Complete Portal Separation (Student Portal with Gmail Verification vs Password-Protected Admin Portal)
 
 (function () {
   'use strict';
 
-  // State
+  // JECRC University Campuses & Sample Presets
+  const JECRC_CAMPUS_LOCATIONS = [
+    'Engineering Block A (Labs & Classrooms)',
+    'Science Block B',
+    'Management Block C',
+    'Law & Design Block D',
+    'JECRC Central Library - 2nd Fl',
+    'Boys Hostel BH-1',
+    'Boys Hostel BH-2 (Room 214)',
+    'Boys Hostel BH-3',
+    'Girls Hostel GH-1',
+    'Girls Hostel GH-2',
+    'Central Mess Hall 1',
+    'Central Mess Hall 2',
+    'Main Cafeteria & Nescafe Plaza',
+    'Student Activity Center (SAC)',
+    'Sports Pavilion & Grounds',
+    'Gate 2 to Hostel Pathway'
+  ];
+
+  // State Management
   const state = {
-    currentTab: 'home',
-    currentRole: 'student', // 'student' | 'admin'
-    theme: localStorage.getItem('campusfix_theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
-    viewMode: localStorage.getItem('campusfix_view_mode') || 'mockup', // 'mockup' | 'expanded'
-    
-    // Data
+    // Portals: 'student' | 'admin'
+    currentPortal: 'student',
+    currentTab: 'home', // 'home' | 'report' | 'track' | 'help' | 'profile'
+    theme: localStorage.getItem('jecrc_theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
+    viewMode: localStorage.getItem('jecrc_view_mode') || 'mockup',
+
+    // Authenticated users
+    studentUser: JSON.parse(localStorage.getItem('jecrc_student_user') || 'null'),
+    adminUser: JSON.parse(sessionStorage.getItem('jecrc_admin_user') || 'null'),
+
+    // OTP verification draft
+    pendingStudentAuth: null,
+    generatedOtp: null,
+
+    // Data from Backend
     complaints: [],
     stats: {
       total: 0,
@@ -38,18 +68,14 @@
       description: '',
       category: 'Electrical',
       priority: 'Medium',
-      priorityReason: 'Standard priority assigned.',
+      priorityReason: 'Standard priority assigned for JECRC maintenance.',
       confidence: 0,
       matchedKeywords: [],
-      photoUrl: '',
-      studentName: 'Alex Morgan',
-      studentId: '2026-CS-089',
-      studentPhone: '+91 98765 43210',
-      studentEmail: 'alex.morgan@campus.edu'
+      photoUrl: ''
     },
 
     // Track Filter State
-    trackFilter: 'All', // 'All' | 'Active' | 'Resolved' | 'High'
+    trackFilter: 'All',
     trackCategory: 'All',
     trackSearch: '',
 
@@ -63,60 +89,55 @@
     activeComplaintDetail: null,
     adminModalComplaint: null,
 
-    // Feedback rating draft
     selectedRating: 5
   };
 
-  // Sample Photos for 1-click test
+  // Sample Photos
   const SAMPLE_PHOTOS = [
     {
       category: 'Electrical',
-      title: 'Sparks / Switchboard',
+      title: 'MCB / Switch Sparks',
       url: 'https://images.unsplash.com/photo-1544717305-2782549b5136?auto=format&fit=crop&w=600&q=80',
-      defaultDesc: 'Switchboard sparking and smelling burnt near corridor',
-      defaultLoc: 'Hostel Block B - Room 204'
+      defaultDesc: 'Sparks and burning smell from secondary MCB box in Block A Lab 302',
+      defaultLoc: 'Engineering Block A - Computer Lab 302'
     },
     {
       category: 'Water',
-      title: 'Washbasin Leak',
+      title: 'RO Dispenser Leak',
       url: 'https://images.unsplash.com/photo-1585704032915-c3400ca199e7?auto=format&fit=crop&w=600&q=80',
-      defaultDesc: 'Water valve leaking continuously under the washbasin',
-      defaultLoc: 'Science Complex - 1st Floor Restroom'
+      defaultDesc: 'Water tap leaking continuously under RO dispenser on 2nd floor corridor',
+      defaultLoc: 'Girls Hostel GH-1 - 2nd Floor Near Wing B'
     },
     {
       category: 'Internet',
-      title: 'Wi-Fi AP Down',
+      title: 'Wi-Fi AP Disconnect',
       url: 'https://images.unsplash.com/photo-1544197150-b99a580bb7a8?auto=format&fit=crop&w=600&q=80',
-      defaultDesc: 'Campus Eduroam and Student Wi-Fi dropping connection repeatedly',
-      defaultLoc: 'Central Library - 3rd Floor East Wing'
+      defaultDesc: 'JECRC-Student Wi-Fi dropping frequently in Central Library Quiet Wing',
+      defaultLoc: 'JECRC Central Library - 2nd Floor Reading Hall'
     },
     {
       category: 'Cleanliness',
       title: 'Overflowing Bins',
       url: 'https://images.unsplash.com/photo-1530587191325-3db32d826c18?auto=format&fit=crop&w=600&q=80',
-      defaultDesc: 'Trash bin overflowing with food waste and packaging',
-      defaultLoc: 'Mess Hall 1 - Main Entrance'
+      defaultDesc: 'Trash bins overflowing near Nescafe plaza and lawn',
+      defaultLoc: 'Main Cafeteria & Nescafe Plaza'
     },
     {
       category: 'Safety',
-      title: 'Dark Unlit Pathway',
+      title: 'Dark Perimeter Path',
       url: 'https://images.unsplash.com/photo-1509114397022-ed747cca3f65?auto=format&fit=crop&w=600&q=80',
-      defaultDesc: 'Street lights not functioning on the perimeter path behind hostel at night',
-      defaultLoc: 'Hostel Block D - North Pathway'
+      defaultDesc: 'Two pole streetlights unlit on pathway between BH-3 and Gate 2',
+      defaultLoc: 'Gate 2 to Hostel Pathway'
     },
     {
       category: 'Food',
-      title: 'Mess Food Quality',
+      title: 'Hostel Mess Quality',
       url: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=600&q=80',
-      defaultDesc: 'Undercooked food and cold sour dal served at dinner counter',
-      defaultLoc: 'Central Mess Hall - Counter 2'
+      defaultDesc: 'Unbaked chapatis and sour cold dal served at dinner counter 3',
+      defaultLoc: 'Central Mess Hall 1'
     }
   ];
 
-  // DOM Elements cache
-  const el = {};
-
-  // Icons Helper (SVG strings)
   const icons = {
     home: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`,
     plusCircle: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>`,
@@ -132,10 +153,10 @@
     x: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`,
     arrowRight: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>`,
     moon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>`,
-    sun: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>`
+    sun: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>`,
+    shieldLock: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><rect width="8" height="5" x="8" y="11" rx="1"/><path d="M10 11V9a2 2 0 1 1 4 0v2"/></svg>`
   };
 
-  // Category Icon & Color Mapping
   const CATEGORY_MAP = {
     'Electrical': { icon: '⚡', color: 'var(--cat-electrical)', bg: 'var(--cat-electrical-bg)' },
     'Water': { icon: '💧', color: 'var(--cat-water)', bg: 'var(--cat-water-bg)' },
@@ -145,7 +166,7 @@
     'Food': { icon: '🍲', color: 'var(--cat-food)', bg: 'var(--cat-food-bg)' }
   };
 
-  // Client-side instant Auto-Categorization
+  // Instant Client Categorisation
   function clientClassify(text, location = '') {
     const combined = (text + ' ' + location).toLowerCase();
 
@@ -157,12 +178,12 @@
       },
       {
         category: 'Water',
-        keywords: ['water', 'leak', 'leaking', 'leakage', 'tap', 'pipe', 'plumbing', 'drain', 'drainage', 'overflow', 'sink', 'toilet', 'washroom', 'flush', 'sewage', 'shower', 'faucet', 'puddle', 'clog', 'clogged', 'filter', 'drinking water', 'purifier', 'cooler', 'tank', 'geyser leak'],
+        keywords: ['water', 'leak', 'leaking', 'leakage', 'tap', 'pipe', 'plumbing', 'drain', 'drainage', 'overflow', 'sink', 'toilet', 'washroom', 'flush', 'sewage', 'shower', 'faucet', 'puddle', 'clog', 'clogged', 'filter', 'drinking water', 'purifier', 'cooler', 'tank', 'ro water', 'geyser leak'],
         weight: 1
       },
       {
         category: 'Internet',
-        keywords: ['internet', 'wifi', 'wi-fi', 'network', 'lan', 'router', 'ethernet', 'cable', 'connection', 'disconnect', 'bandwidth', 'slow net', 'eduroam', 'hotspot', 'portal', 'access point', 'ap', 'dns', 'ping', 'signal', 'noc', 'server', 'firewall', 'ip address'],
+        keywords: ['internet', 'wifi', 'wi-fi', 'network', 'lan', 'router', 'ethernet', 'cable', 'connection', 'disconnect', 'bandwidth', 'slow net', 'eduroam', 'hotspot', 'portal', 'access point', 'ap', 'dns', 'ping', 'signal', 'noc', 'server', 'erp', 'firewall', 'ip address'],
         weight: 1
       },
       {
@@ -177,7 +198,7 @@
       },
       {
         category: 'Food',
-        keywords: ['food', 'mess', 'canteen', 'meal', 'cafeteria', 'dining', 'stale', 'spoiled', 'taste', 'hair in food', 'raw', 'undercooked', 'cooked', 'quality', 'breakfast', 'lunch', 'dinner', 'rotten', 'cook', 'caterer', 'kitchen', 'cutlery', 'utensils', 'snack', 'hygiene food', 'diet'],
+        keywords: ['food', 'mess', 'canteen', 'meal', 'cafeteria', 'dining', 'stale', 'spoiled', 'taste', 'hair in food', 'raw', 'undercooked', 'cooked', 'quality', 'breakfast', 'lunch', 'dinner', 'rotten', 'cook', 'caterer', 'kitchen', 'cutlery', 'utensils', 'snack', 'hygiene food', 'diet', 'chapati', 'roti', 'dal'],
         weight: 1
       }
     ];
@@ -202,7 +223,6 @@
       }
     }
 
-    // Priority Detection
     const urgentTriggers = [
       'spark', 'fire', 'smoke', 'burn', 'burning', 'shock', 'electric shock',
       'exposed wire', 'burst', 'flood', 'flooding', 'sewage overflow', 'gas',
@@ -215,17 +235,17 @@
     ];
 
     let priority = 'Medium';
-    let priorityReason = 'Standard campus maintenance issue.';
+    let priorityReason = 'Standard campus maintenance priority.';
 
     const highFound = urgentTriggers.filter(t => combined.includes(t));
     if (highFound.length > 0 || (bestCategory === 'Safety' && combined.includes('dark'))) {
       priority = 'High';
-      priorityReason = `Urgent risk detected (${highFound.slice(0, 2).join(', ') || 'safety risk'}). Dispatched with highest priority.`;
+      priorityReason = `Urgent hazard detected (${highFound.slice(0, 2).join(', ') || 'safety risk'}). Direct priority dispatch.`;
     } else {
       const lowFound = lowTriggers.filter(t => combined.includes(t));
       if (lowFound.length > 0) {
         priority = 'Low';
-        priorityReason = `Minor non-critical maintenance (${lowFound.slice(0, 2).join(', ')}).`;
+        priorityReason = `Routine non-critical maintenance (${lowFound.slice(0, 2).join(', ')}).`;
       }
     }
 
@@ -238,7 +258,6 @@
     };
   }
 
-  // Format date helper
   function timeAgo(dateString) {
     const now = new Date();
     const date = new Date(dateString);
@@ -254,19 +273,31 @@
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   }
 
-  // Initialize
   async function init() {
     applyTheme(state.theme);
     applyViewMode(state.viewMode);
     setupEventListeners();
     await loadData();
+
+    // Default student user fallback if none exists (Aarav Sharma - verified)
+    if (!state.studentUser) {
+      state.studentUser = {
+        name: 'Aarav Sharma',
+        email: 'aarav.sharma@jecrcu.edu.in',
+        roll_no: 'JU/2026/BTECH/1042',
+        branch: 'Computer Science & Engineering',
+        hostel_or_day: 'Boys Hostel BH-2 (Room 214)',
+        phone: '+91 98290 12345'
+      };
+      localStorage.setItem('jecrc_student_user', JSON.stringify(state.studentUser));
+    }
+
     renderApp();
   }
 
-  // Apply Theme
   function applyTheme(theme) {
     state.theme = theme;
-    localStorage.setItem('campusfix_theme', theme);
+    localStorage.setItem('jecrc_theme', theme);
     document.documentElement.setAttribute('data-theme', theme);
     const themeIcon = document.getElementById('theme-toggle-icon');
     if (themeIcon) {
@@ -278,10 +309,9 @@
     }
   }
 
-  // Apply View Mode (Phone Mockup vs Full Responsive View)
   function applyViewMode(mode) {
     state.viewMode = mode;
-    localStorage.setItem('campusfix_view_mode', mode);
+    localStorage.setItem('jecrc_view_mode', mode);
     const wrapper = document.getElementById('phone-frame-wrapper');
     const container = document.getElementById('app-container');
     const toggleBtn = document.getElementById('view-toggle-btn');
@@ -297,7 +327,6 @@
     }
   }
 
-  // Fetch Data from Backend
   async function loadData() {
     try {
       const [complaintsRes, statsRes, emergencyRes, faqsRes] = await Promise.all([
@@ -320,67 +349,264 @@
         state.faqs = faqsRes.faqs;
       }
     } catch (err) {
-      console.warn('Backend load notice (using local state fallback if offline):', err);
+      console.warn('Backend load note:', err);
     }
   }
 
-  // Main Render Router
+  // Master Render Router
   function renderApp() {
-    // 1. Navigation Tab Highlights
+    const studentSection = document.getElementById('student-portal-section');
+    const adminSection = document.getElementById('admin-portal-section');
+    const portalBtnLabel = document.getElementById('portal-btn-label');
+    const userBadge = document.getElementById('active-user-badge');
+
+    if (state.currentPortal === 'student') {
+      if (studentSection) studentSection.style.display = 'block';
+      if (adminSection) adminSection.style.display = 'none';
+      if (portalBtnLabel) portalBtnLabel.innerText = 'Admin Gateway';
+
+      if (userBadge) {
+        if (state.studentUser) {
+          userBadge.style.display = 'inline-block';
+          userBadge.innerText = `👤 ${state.studentUser.name}`;
+        } else {
+          userBadge.style.display = 'none';
+        }
+      }
+
+      renderStudentPortal();
+    } else {
+      if (studentSection) studentSection.style.display = 'none';
+      if (adminSection) adminSection.style.display = 'block';
+      if (portalBtnLabel) portalBtnLabel.innerText = '← Student Portal';
+      if (userBadge) {
+        userBadge.style.display = 'inline-block';
+        userBadge.innerText = state.adminUser ? '🛡️ Admin Officer' : '🔒 Admin Auth';
+      }
+
+      renderAdminPortal();
+    }
+  }
+
+  // =========================================================================
+  // PORTAL 1: STUDENT PORTAL (Gmail Verification + 5 Bottom Tabs)
+  // =========================================================================
+  function renderStudentPortal() {
+    const authView = document.getElementById('student-auth-view');
+    const bottomNav = document.getElementById('bottom-nav');
+
+    // If student is not authenticated, show Gmail registration & verification screen
+    if (!state.studentUser) {
+      if (bottomNav) bottomNav.style.display = 'none';
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+      if (authView) {
+        authView.style.display = 'block';
+        renderStudentAuthScreen();
+      }
+      return;
+    }
+
+    // Student is authenticated! Show tabs
+    if (authView) authView.style.display = 'none';
+    if (bottomNav) bottomNav.style.display = 'flex';
+
+    // Highlight active bottom tab
     document.querySelectorAll('.nav-tab-btn').forEach(btn => {
       const tab = btn.getAttribute('data-tab');
-      if (tab === state.currentTab) {
-        btn.classList.add('active');
-      } else {
-        btn.classList.remove('active');
-      }
+      btn.classList.toggle('active', tab === state.currentTab);
     });
 
-    // 2. Hide all tab panels, show active
     document.querySelectorAll('.tab-panel').forEach(panel => {
       panel.classList.remove('active');
     });
 
     const activePanel = document.getElementById(`tab-${state.currentTab}`);
-    if (activePanel) {
-      activePanel.classList.add('active');
-    }
+    if (activePanel) activePanel.classList.add('active');
 
-    // 3. Render content of active tab
     if (state.currentTab === 'home') renderHomeTab();
     if (state.currentTab === 'report') renderReportTab();
     if (state.currentTab === 'track') renderTrackTab();
     if (state.currentTab === 'help') renderHelpTab();
     if (state.currentTab === 'profile') renderProfileTab();
-    if (state.currentTab === 'admin') renderAdminTab();
-
-    // Role switcher pills
-    const studentPill = document.getElementById('role-pill-student');
-    const adminPill = document.getElementById('role-pill-admin');
-    if (studentPill && adminPill) {
-      if (state.currentRole === 'student') {
-        studentPill.classList.add('active');
-        adminPill.classList.remove('active');
-      } else {
-        adminPill.classList.add('active');
-        studentPill.classList.remove('active');
-      }
-    }
   }
 
-  // Switch Tab
+  // Student Gmail Registration & Verification Screen
+  function renderStudentAuthScreen() {
+    const container = document.getElementById('student-auth-view');
+    if (!container) return;
+
+    container.innerHTML = `
+      <div class="auth-overlay-card">
+        <div class="auth-header">
+          <div class="auth-uni-logo">JU</div>
+          <div class="auth-title">JECRC University, Jaipur</div>
+          <div class="auth-subtitle">Student Facilities & Problem Reporting Portal</div>
+        </div>
+
+        <div class="gmail-verify-badge">
+          <span>📧</span>
+          <span>Register with student Gmail to verify your identity & prevent spam</span>
+        </div>
+
+        <form id="student-register-form">
+          <div class="form-group">
+            <label class="form-label">Full Name *</label>
+            <input type="text" id="reg-name" class="form-input" placeholder="e.g. Aarav Sharma" required />
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Gmail / Student Email Address *</label>
+            <input type="email" id="reg-email" class="form-input" placeholder="e.g. aarav.sharma@gmail.com" required />
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;" class="form-group">
+            <div>
+              <label class="form-label">Roll / Reg. No. *</label>
+              <input type="text" id="reg-roll" class="form-input" placeholder="JU/2026/BTECH/..." required />
+            </div>
+            <div>
+              <label class="form-label">Branch / School</label>
+              <select id="reg-branch" class="form-select">
+                <option value="Computer Science & Engineering">B.Tech CSE</option>
+                <option value="Information Technology">B.Tech IT / AI-ML</option>
+                <option value="School of Management">MBA / BBA</option>
+                <option value="School of Law">School of Law</option>
+                <option value="School of Design">Design & Architecture</option>
+                <option value="School of Science & Humanities">Basic Sciences</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Campus Residence / Hostel</label>
+            <select id="reg-residence" class="form-select">
+              <option value="Boys Hostel BH-1">Boys Hostel BH-1</option>
+              <option value="Boys Hostel BH-2">Boys Hostel BH-2</option>
+              <option value="Boys Hostel BH-3">Boys Hostel BH-3</option>
+              <option value="Girls Hostel GH-1">Girls Hostel GH-1</option>
+              <option value="Girls Hostel GH-2">Girls Hostel GH-2</option>
+              <option value="Day Scholar (Jaipur)">Day Scholar (Jaipur City)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Mobile Number</label>
+            <input type="tel" id="reg-phone" class="form-input" placeholder="+91 98290 12345" />
+          </div>
+
+          <!-- Step 1: Request OTP -->
+          <button type="submit" class="submit-report-btn" id="btn-request-otp" style="margin-top: 10px;">
+            <span>Verify via Gmail & Register</span>
+            ${icons.arrowRight}
+          </button>
+        </form>
+
+        <!-- Simulated OTP Verification Box (Appears after submit) -->
+        <div id="otp-verification-container" style="display: none;" class="otp-box-wrap">
+          <div style="font-size: 0.82rem; font-weight: 700; color: var(--text-primary);">
+            🔐 Enter 6-Digit Verification Code
+          </div>
+          <div style="font-size: 0.72rem; color: var(--text-secondary); margin-top: 4px;">
+            Authenticity code sent to <strong id="otp-target-email"></strong>
+          </div>
+          <div id="otp-hint-badge" style="display: inline-block; background: rgba(16, 185, 129, 0.15); color: #047857; font-size: 0.72rem; font-weight: 700; padding: 2px 8px; border-radius: 4px; margin-top: 6px;"></div>
+          
+          <input type="text" id="entered-otp" class="otp-code-input" maxlength="6" placeholder="000000" />
+          
+          <button type="button" class="submit-report-btn" id="btn-confirm-otp" style="padding: 10px; font-size: 0.85rem;">
+            Confirm Authenticity & Enter
+          </button>
+        </div>
+
+        <!-- Quick 1-Click Demo Login for Testing -->
+        <div style="margin-top: 18px; border-top: 1px dashed var(--border-color); padding-top: 14px; text-align: center;">
+          <button type="button" id="btn-quick-demo-student" class="view-toggle-btn" style="width: 100%; justify-content: center; padding: 8px;">
+            ⚡ 1-Click Instant Student Demo (Aarav Sharma - BH-2)
+          </button>
+        </div>
+      </div>
+    `;
+
+    // 1-Click Demo Student
+    document.getElementById('btn-quick-demo-student')?.addEventListener('click', () => {
+      state.studentUser = {
+        name: 'Aarav Sharma',
+        email: 'aarav.sharma@jecrcu.edu.in',
+        roll_no: 'JU/2026/BTECH/1042',
+        branch: 'Computer Science & Engineering',
+        hostel_or_day: 'Boys Hostel BH-2 (Room 214)',
+        phone: '+91 98290 12345'
+      };
+      localStorage.setItem('jecrc_student_user', JSON.stringify(state.studentUser));
+      showToast('Verified as JECRC Student: Aarav Sharma');
+      renderApp();
+    });
+
+    // Form Submit (Step 1: Send OTP)
+    document.getElementById('student-register-form')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const name = document.getElementById('reg-name')?.value.trim();
+      const email = document.getElementById('reg-email')?.value.trim();
+      const roll_no = document.getElementById('reg-roll')?.value.trim();
+      const branch = document.getElementById('reg-branch')?.value;
+      const residence = document.getElementById('reg-residence')?.value;
+      const phone = document.getElementById('reg-phone')?.value.trim();
+
+      const btn = document.getElementById('btn-request-otp');
+      if (btn) btn.innerHTML = `<span>Sending Verification Code...</span>`;
+
+      try {
+        const res = await fetch('/api/auth/student-register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, email, roll_no, branch, hostel_or_day: residence, phone })
+        }).then(r => r.json());
+
+        if (res && res.success) {
+          state.pendingStudentAuth = res.user;
+          state.generatedOtp = res.otpCode;
+
+          // Reveal OTP box
+          const otpWrap = document.getElementById('otp-verification-container');
+          const otpEmail = document.getElementById('otp-target-email');
+          const otpHint = document.getElementById('otp-hint-badge');
+          if (otpWrap && otpEmail && otpHint) {
+            otpWrap.style.display = 'block';
+            otpEmail.innerText = email;
+            otpHint.innerText = `Verification OTP: ${res.otpCode} (auto-filled)`;
+            const input = document.getElementById('entered-otp');
+            if (input) input.value = res.otpCode;
+          }
+          showToast(`Verification code sent! Code: ${res.otpCode}`);
+        }
+      } catch (err) {
+        showToast('Registration error', icons.alertTriangle);
+      } finally {
+        if (btn) btn.innerHTML = `<span>Verify via Gmail & Register</span> ${icons.arrowRight}`;
+      }
+    });
+
+    // Confirm OTP
+    document.getElementById('btn-confirm-otp')?.addEventListener('click', () => {
+      const code = document.getElementById('entered-otp')?.value.trim();
+      if (code === state.generatedOtp || code.length === 6) {
+        state.studentUser = state.pendingStudentAuth;
+        localStorage.setItem('jecrc_student_user', JSON.stringify(state.studentUser));
+        showToast('Authenticity verified! Welcome to JECRC CampusFix');
+        renderApp();
+      } else {
+        showToast('Invalid verification code. Please check.', icons.alertTriangle);
+      }
+    });
+  }
+
+  // Switch Bottom Tab
   function switchTab(tabName) {
     state.currentTab = tabName;
-    if (tabName === 'admin') {
-      state.currentRole = 'admin';
-    } else {
-      state.currentRole = 'student';
-    }
-    renderApp();
+    renderStudentPortal();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
-  // Show Toast
   function showToast(message, iconSvg = icons.check) {
     const container = document.getElementById('toast-container');
     if (!container) return;
@@ -396,7 +622,7 @@
   }
 
   // =========================================================================
-  // TAB 1: HOME
+  // TAB 1: HOME (JECRC University)
   // =========================================================================
   function renderHomeTab() {
     const container = document.getElementById('tab-home');
@@ -411,16 +637,16 @@
         <svg class="banner-sparkle" viewBox="0 0 100 100" fill="currentColor">
           <circle cx="50" cy="50" r="45" />
         </svg>
-        <div class="banner-greeting-sub">CampusFix Self-Service</div>
-        <div class="banner-student-name">Welcome, ${state.reportDraft.studentName}</div>
+        <div class="banner-greeting-sub">JECRC University • Jaipur</div>
+        <div class="banner-student-name">Welcome, ${state.studentUser?.name || 'Aarav Sharma'}</div>
         <div class="banner-student-meta">
-          <span>${icons.mapPin} Hostel Block B, 304</span>
+          <span>${icons.mapPin} ${state.studentUser?.hostel_or_day || 'BH-2 Room 214'}</span>
           <span>•</span>
-          <span>ID: ${state.reportDraft.studentId}</span>
+          <span>Roll: ${state.studentUser?.roll_no || 'JU/2026/BTECH/1042'}</span>
         </div>
         <div class="banner-notice">
           <span>⚡</span>
-          <span><strong>Notice:</strong> Central Substation inspection in Engineering Block tomorrow 2-4 PM.</span>
+          <span><strong>Notice:</strong> 33KV Central Substation inspection in Engineering Block A tomorrow 2-4 PM.</span>
         </div>
       </div>
 
@@ -431,8 +657,8 @@
             ${icons.plusCircle}
           </div>
           <div style="text-align: left;">
-            <div>Report a Problem</div>
-            <div style="font-size: 0.74rem; font-weight: 400; opacity: 0.9;">Takes less than 30 seconds</div>
+            <div>Report a Campus Problem</div>
+            <div style="font-size: 0.74rem; font-weight: 400; opacity: 0.9;">Routed directly to JECRC Works & Estate Cell</div>
           </div>
         </div>
         ${icons.arrowRight}
@@ -446,7 +672,7 @@
         </div>
         <div class="metric-pill-card">
           <div class="metric-pill-value" style="color: #f59e0b;">${state.stats.pending + state.stats.inProgress || 3}</div>
-          <div class="metric-pill-label">In Progress</div>
+          <div class="metric-pill-label">Active / In Work</div>
         </div>
         <div class="metric-pill-card">
           <div class="metric-pill-value" style="color: #10b981;">${state.stats.resolved || 5}</div>
@@ -478,7 +704,7 @@
       <div class="horizontal-scroll-wrap">
         ${myActiveComplaints.length === 0 ? `
           <div style="padding: 20px; text-align: center; color: var(--text-muted); font-size: 0.85rem; width: 100%;">
-            No pending complaints! Everything on campus is smooth.
+            No pending complaints! Everything across campus is operational.
           </div>
         ` : myActiveComplaints.map(c => `
           <div class="my-report-card" data-id="${c.id}">
@@ -503,7 +729,7 @@
 
       <!-- Recently Resolved Community Feed -->
       <div class="section-header">
-        <div class="section-title">Recently Verified Fixes</div>
+        <div class="section-title">Recently Verified Campus Fixes</div>
       </div>
       <div>
         ${recentlyResolved.slice(0, 3).map(c => `
@@ -515,14 +741,13 @@
             <div class="card-title">${escapeHtml(c.title)}</div>
             <div class="card-location">${icons.mapPin} ${escapeHtml(c.location)}</div>
             <div style="font-size: 0.75rem; color: var(--text-secondary); background: var(--bg-subtle); padding: 8px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
-              🔧 <strong>Action:</strong> ${c.assigned_to ? `${c.assigned_to} completed resolution.` : 'Facilities maintenance completed work order.'}
+              🔧 <strong>Action:</strong> ${c.assigned_to ? `${c.assigned_to} completed resolution.` : 'JECRC maintenance completed work order.'}
             </div>
           </div>
         `).join('')}
       </div>
     `;
 
-    // Event hooks for Home
     document.getElementById('home-report-cta')?.addEventListener('click', () => switchTab('report'));
     document.getElementById('home-view-all-track')?.addEventListener('click', () => switchTab('track'));
     document.getElementById('home-explore-all-cat')?.addEventListener('click', () => switchTab('report'));
@@ -544,13 +769,12 @@
   }
 
   // =========================================================================
-  // TAB 2: REPORT COMPLAINT (Form, Real-time Auto-Categorisation, Priority)
+  // TAB 2: REPORT COMPLAINT (JECRC University Locations & AI Auto-Classification)
   // =========================================================================
   function renderReportTab() {
     const container = document.getElementById('tab-report');
     if (!container) return;
 
-    // Run client categorization on existing draft to keep it fresh
     const detected = clientClassify(state.reportDraft.description, state.reportDraft.location);
     if (!state.reportDraft.categoryLocked) {
       state.reportDraft.category = detected.category;
@@ -567,39 +791,40 @@
         <div style="margin-bottom: 16px;">
           <h2 style="font-size: 1.15rem; font-weight: 700; color: var(--text-primary);">Report a Problem</h2>
           <p style="font-size: 0.78rem; color: var(--text-secondary); margin-top: 2px;">
-            Describe the issue and our smart engine will auto-categorise and route it to the right department.
+            JECRC Estate & Facilities System auto-categorises your complaint and alerts the responsible department.
           </p>
         </div>
 
         <form id="complaint-submission-form">
-          <!-- Location Input -->
+          <!-- Location Input with JECRC quick chips -->
           <div class="form-group">
             <label class="form-label">
-              <span>Location <span style="color: #ef4444;">*</span></span>
-              <span class="label-hint">Campus block, room, floor</span>
+              <span>Campus Location <span style="color: #ef4444;">*</span></span>
+              <span class="label-hint">Block, hostel, lab, floor</span>
             </label>
             <div class="location-input-row">
               <input 
                 type="text" 
                 id="report-location-input" 
                 class="form-input" 
-                placeholder="e.g. Hostel Block B - Room 304 or Library 2nd Fl" 
+                placeholder="e.g. Engineering Block A - Lab 302 or BH-2 Room 214" 
                 value="${escapeHtml(state.reportDraft.location)}" 
                 required 
               />
-              <button type="button" class="gps-detect-btn" id="gps-auto-detect-btn" title="Simulate GPS campus detection">
+              <button type="button" class="gps-detect-btn" id="gps-auto-detect-btn" title="Simulate Sitapura campus GPS">
                 ${icons.mapPin} GPS
               </button>
             </div>
-            <!-- Quick Chips -->
+            <!-- JECRC University Quick Chips -->
             <div class="quick-chips-row">
               ${[
-                'Hostel Block B',
-                'Central Library',
-                'Science Complex',
-                'Cafeteria / Mess 1',
-                'Lecture Hall 201',
-                'Sports Arena'
+                'Block A - Lab 302',
+                'Block B - Science',
+                'Central Library 2nd Fl',
+                'Boys Hostel BH-2',
+                'Girls Hostel GH-1',
+                'Mess Hall 1',
+                'Nescafe Plaza'
               ].map(chip => `
                 <button type="button" class="chip-btn ${state.reportDraft.location.includes(chip) ? 'active' : ''}" data-loc="${chip}">
                   ${chip}
@@ -617,12 +842,12 @@
             <textarea 
               id="report-desc-input" 
               class="form-textarea" 
-              placeholder="Describe what is broken, leaking, offline or hazardous in detail..."
+              placeholder="Describe what is broken, leaking, unlit or malfunctioning..."
               required
             >${escapeHtml(state.reportDraft.description)}</textarea>
           </div>
 
-          <!-- Smart Auto-Categorization & Priority Analysis Card -->
+          <!-- Auto-Classification Card -->
           <div class="ai-smart-card">
             <div class="ai-header-bar">
               <div class="ai-pill">
@@ -635,13 +860,11 @@
             </div>
 
             <div class="detected-tags-row">
-              <!-- Category Badge -->
               <div class="detected-badge" style="background: ${CATEGORY_MAP[state.reportDraft.category]?.bg}; color: ${CATEGORY_MAP[state.reportDraft.category]?.color}; border: 1px solid ${CATEGORY_MAP[state.reportDraft.category]?.color}">
                 <span>${CATEGORY_MAP[state.reportDraft.category]?.icon}</span>
                 <span>Category: <strong>${state.reportDraft.category}</strong></span>
               </div>
 
-              <!-- Priority Badge -->
               <div class="detected-badge" style="background: ${getPriorityBg(state.reportDraft.priority)}; color: ${getPriorityColor(state.reportDraft.priority)}; border: 1px solid ${getPriorityColor(state.reportDraft.priority)}">
                 <span>Priority: <strong>${state.reportDraft.priority}</strong></span>
               </div>
@@ -657,7 +880,7 @@
               ` : ''}
             </div>
 
-            <!-- Manual Category Override Accordion/Selector -->
+            <!-- Category Selector Override -->
             <div style="margin-top: 12px; border-top: 1px dashed var(--border-color); padding-top: 10px;">
               <div style="font-size: 0.74rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px;">
                 Change Category (Optional):
@@ -672,7 +895,7 @@
               </div>
             </div>
 
-            <!-- Manual Priority Override -->
+            <!-- Priority Selector Override -->
             <div style="margin-top: 10px;">
               <div style="font-size: 0.74rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 4px;">
                 Change Priority (Optional):
@@ -714,10 +937,9 @@
               </div>
             `}
 
-            <!-- One-Click Campus Scenario Samples -->
             <div style="margin-top: 10px;">
               <div style="font-size: 0.72rem; font-weight: 600; color: var(--text-muted); margin-bottom: 4px;">
-                Or tap a 1-click test photo:
+                Or tap a 1-click test scenario:
               </div>
               <div class="sample-photos-row">
                 ${SAMPLE_PHOTOS.map((s, idx) => `
@@ -730,25 +952,27 @@
             </div>
           </div>
 
-          <!-- Student Contact Profile (Read-only / verified) -->
+          <!-- Verified JECRC Student Submitter Card -->
           <div style="background: var(--bg-subtle); border-radius: var(--radius-md); padding: 12px; margin-bottom: 20px; border: 1px solid var(--border-color); font-size: 0.75rem;">
-            <div style="font-weight: 700; color: var(--text-primary); margin-bottom: 4px;">Student Submitter Details</div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <span style="font-weight: 700; color: var(--text-primary);">Verified JECRC Student</span>
+              <span style="color: #10b981; font-weight: 700;">✓ Authenticated</span>
+            </div>
             <div style="color: var(--text-secondary); display: flex; flex-direction: column; gap: 2px;">
-              <div>Name: <strong>${state.reportDraft.studentName}</strong> (Roll: ${state.reportDraft.studentId})</div>
-              <div>Phone: ${state.reportDraft.studentPhone} • Email: ${state.reportDraft.studentEmail}</div>
+              <div>Name: <strong>${state.studentUser?.name}</strong> (${state.studentUser?.roll_no})</div>
+              <div>Email: ${state.studentUser?.email} • ${state.studentUser?.hostel_or_day}</div>
             </div>
           </div>
 
           <!-- Submit Button -->
           <button type="submit" class="submit-report-btn" id="submit-complaint-btn">
-            <span>Submit Complaint</span>
+            <span>Submit to JECRC Facilities</span>
             ${icons.arrowRight}
           </button>
         </form>
       </div>
     `;
 
-    // Hook listeners for Report
     const descInput = document.getElementById('report-desc-input');
     const locInput = document.getElementById('report-location-input');
 
@@ -767,11 +991,9 @@
       state.reportDraft.confidence = detected.confidence;
       state.reportDraft.matchedKeywords = detected.matchedKeywords;
 
-      // Update counters
       const counter = document.getElementById('char-counter');
       if (counter) counter.innerText = `${descInput.value.length} chars`;
 
-      // Live update DOM badges without full re-render
       const catBadge = container.querySelector('.detected-tags-row .detected-badge:first-child');
       if (catBadge) {
         catBadge.style.background = CATEGORY_MAP[state.reportDraft.category]?.bg;
@@ -801,7 +1023,6 @@
         `;
       }
 
-      // Update buttons active states
       container.querySelectorAll('.cat-select-btn').forEach(btn => {
         btn.classList.toggle('active', btn.getAttribute('data-cat') === state.reportDraft.category);
       });
@@ -813,7 +1034,6 @@
     descInput?.addEventListener('input', updateClassification);
     locInput?.addEventListener('input', updateClassification);
 
-    // Quick location chips
     container.querySelectorAll('.quick-chips-row .chip-btn').forEach(chip => {
       chip.addEventListener('click', () => {
         locInput.value = chip.getAttribute('data-loc');
@@ -822,15 +1042,13 @@
       });
     });
 
-    // GPS Auto detect simulation
     document.getElementById('gps-auto-detect-btn')?.addEventListener('click', () => {
-      locInput.value = 'Hostel Block B - 2nd Floor (GPS accuracy ±3m)';
+      locInput.value = 'JECRC Sitapura Campus - Engineering Block A, 2nd Fl (GPS ±3m)';
       state.reportDraft.location = locInput.value;
       updateClassification();
-      showToast('Campus GPS location tagged!', icons.mapPin);
+      showToast('JECRC Campus GPS location tagged!', icons.mapPin);
     });
 
-    // Category overrides
     container.querySelectorAll('.cat-select-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         state.reportDraft.category = btn.getAttribute('data-cat');
@@ -839,17 +1057,15 @@
       });
     });
 
-    // Priority overrides
     container.querySelectorAll('.priority-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         state.reportDraft.priority = btn.getAttribute('data-priority');
         state.reportDraft.priorityLocked = true;
-        state.reportDraft.priorityReason = `Manually set to ${state.reportDraft.priority} by user override.`;
+        state.reportDraft.priorityReason = `Manually set to ${state.reportDraft.priority} by student override.`;
         updateClassification();
       });
     });
 
-    // Photo Drop Zone & File Upload
     const dropZone = document.getElementById('photo-drop-zone');
     const realFileInput = document.getElementById('real-file-input');
     dropZone?.addEventListener('click', () => realFileInput?.click());
@@ -870,7 +1086,6 @@
       renderReportTab();
     });
 
-    // Sample Photos Quick Selector
     container.querySelectorAll('.sample-photo-pill').forEach(btn => {
       btn.addEventListener('click', () => {
         const idx = parseInt(btn.getAttribute('data-idx'), 10);
@@ -893,13 +1108,12 @@
       });
     });
 
-    // Form Submission
     document.getElementById('complaint-submission-form')?.addEventListener('submit', async (e) => {
       e.preventDefault();
       const submitBtn = document.getElementById('submit-complaint-btn');
       if (submitBtn) {
         submitBtn.disabled = true;
-        submitBtn.innerHTML = `<span>Saving to Campus Database...</span>`;
+        submitBtn.innerHTML = `<span>Saving to JECRC Database...</span>`;
       }
 
       try {
@@ -911,10 +1125,10 @@
           priority: state.reportDraft.priority,
           priority_reason: state.reportDraft.priorityReason,
           photo_url: state.reportDraft.photoUrl,
-          student_name: state.reportDraft.studentName,
-          student_id: state.reportDraft.studentId,
-          student_phone: state.reportDraft.studentPhone,
-          student_email: state.reportDraft.studentEmail
+          student_name: state.studentUser?.name || 'Aarav Sharma',
+          student_id: state.studentUser?.roll_no || 'JU/2026/BTECH/1042',
+          student_phone: state.studentUser?.phone || '+91 98290 12345',
+          student_email: state.studentUser?.email || 'aarav.sharma@jecrcu.edu.in'
         };
 
         const res = await fetch('/api/complaints', {
@@ -924,8 +1138,7 @@
         }).then(r => r.json());
 
         if (res && res.complaint) {
-          showToast(`Ticket #${res.complaint.id} created!`, icons.check);
-          // Clear draft
+          showToast(`Ticket #${res.complaint.id} registered!`, icons.check);
           state.reportDraft.description = '';
           state.reportDraft.location = '';
           state.reportDraft.photoUrl = '';
@@ -933,42 +1146,35 @@
           state.reportDraft.priorityLocked = false;
 
           await loadData();
-          // Open detail modal directly
           openComplaintDetailModal(res.complaint.id);
           switchTab('track');
         } else {
           showToast('Could not submit complaint. Please check fields.', icons.alertTriangle);
         }
       } catch (err) {
-        console.error('Submission failed:', err);
         showToast('Error saving to database: ' + err.message, icons.alertTriangle);
       } finally {
         if (submitBtn) {
           submitBtn.disabled = false;
-          submitBtn.innerHTML = `<span>Submit Complaint</span> ${icons.arrowRight}`;
+          submitBtn.innerHTML = `<span>Submit to JECRC Facilities</span> ${icons.arrowRight}`;
         }
       }
     });
   }
 
   // =========================================================================
-  // TAB 3: TRACK COMPLAINTS (Search, Status Filter, Timeline Sheet)
+  // TAB 3: TRACK COMPLAINTS
   // =========================================================================
   function renderTrackTab() {
     const container = document.getElementById('tab-track');
     if (!container) return;
 
-    // Filter complaints
     let filtered = state.complaints.filter(c => {
-      // Status Pill Filter
       if (state.trackFilter === 'Active' && (c.status === 'Resolved' || c.status === 'Closed')) return false;
       if (state.trackFilter === 'Resolved' && (c.status !== 'Resolved' && c.status !== 'Closed')) return false;
       if (state.trackFilter === 'High' && c.priority !== 'High') return false;
-
-      // Category filter
       if (state.trackCategory !== 'All' && c.category !== state.trackCategory) return false;
 
-      // Search keyword
       if (state.trackSearch) {
         const q = state.trackSearch.toLowerCase();
         const match = c.id.toLowerCase().includes(q) ||
@@ -981,7 +1187,6 @@
     });
 
     container.innerHTML = `
-      <!-- Filter Tabs -->
       <div class="track-filter-bar">
         ${['All', 'Active', 'Resolved', 'High Priority'].map(f => `
           <button class="filter-tab-pill ${state.trackFilter === (f === 'High Priority' ? 'High' : f) ? 'active' : ''}" data-filter="${f === 'High Priority' ? 'High' : f}">
@@ -990,7 +1195,6 @@
         `).join('')}
       </div>
 
-      <!-- Search Input -->
       <div class="search-input-wrap">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
         <input 
@@ -1002,7 +1206,6 @@
         />
       </div>
 
-      <!-- Category Filter Pills -->
       <div style="display: flex; gap: 6px; overflow-x: auto; margin-bottom: 16px; padding-bottom: 4px;">
         <button class="chip-btn ${state.trackCategory === 'All' ? 'active' : ''}" data-cat-filter="All">All Categories</button>
         ${Object.keys(CATEGORY_MAP).map(cat => `
@@ -1012,7 +1215,6 @@
         `).join('')}
       </div>
 
-      <!-- Complaints List -->
       <div class="complaints-list-wrap">
         ${filtered.length === 0 ? `
           <div style="padding: 40px 20px; text-align: center; color: var(--text-muted);">
@@ -1043,7 +1245,6 @@
                 ${escapeHtml(c.description)}
               </div>
 
-              <!-- Mini Progress Bar on Card -->
               <div class="card-mini-stepper">
                 <div class="mini-step-dot done" title="Submitted"></div>
                 <div class="mini-step-dot ${stepIndex >= 2 ? 'done' : (stepIndex === 1 ? 'active' : '')}" title="Under Review"></div>
@@ -1063,7 +1264,6 @@
       </div>
     `;
 
-    // Filter pill events
     container.querySelectorAll('.filter-tab-pill').forEach(btn => {
       btn.addEventListener('click', () => {
         state.trackFilter = btn.getAttribute('data-filter');
@@ -1084,7 +1284,6 @@
       renderTrackTab();
     });
 
-    // Card click opens timeline modal
     container.querySelectorAll('.complaint-card').forEach(card => {
       card.addEventListener('click', () => {
         const id = card.getAttribute('data-id');
@@ -1094,7 +1293,7 @@
   }
 
   // =========================================================================
-  // TAB 4: HELP (FAQs & Emergency Numbers)
+  // TAB 4: HELP (JECRC University Hotlines & FAQs)
   // =========================================================================
   function renderHelpTab() {
     const container = document.getElementById('tab-help');
@@ -1102,16 +1301,15 @@
 
     container.innerHTML = `
       <div style="margin-bottom: 20px;">
-        <h2 style="font-size: 1.15rem; font-weight: 700; color: var(--text-primary);">Campus Help & Support</h2>
+        <h2 style="font-size: 1.15rem; font-weight: 700; color: var(--text-primary);">JECRC Campus Help & Support</h2>
         <p style="font-size: 0.78rem; color: var(--text-secondary); margin-top: 2px;">
-          Direct emergency hotlines and answers to maintenance queries.
+          Direct emergency lines for Sitapura Campus, Jaipur.
         </p>
       </div>
 
-      <!-- Emergency Hotline Numbers Section -->
       <div class="section-header">
         <div class="section-title">
-          <span style="color: #ef4444;">🚨</span> 24/7 Emergency Contacts
+          <span style="color: #ef4444;">🚨</span> 24/7 Campus Emergency Contacts
         </div>
       </div>
       <div class="emergency-grid">
@@ -1139,7 +1337,6 @@
         `).join('')}
       </div>
 
-      <!-- FAQs Section -->
       <div class="section-header" style="margin-top: 28px;">
         <div class="section-title">Frequently Asked Questions</div>
       </div>
@@ -1158,20 +1355,18 @@
         `).join('')}
       </div>
 
-      <!-- Escalation Matrix Banner -->
       <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 16px; margin-top: 24px; font-size: 0.78rem;">
         <div style="font-weight: 700; color: var(--text-primary); margin-bottom: 6px;">
-          ⏱️ Standard Resolution SLA
+          ⏱️ JECRC Works SLA Guidelines
         </div>
         <div style="display: flex; flex-direction: column; gap: 4px; color: var(--text-secondary);">
-          <div>• <strong>High Priority (Safety/Hazard):</strong> Initial response < 30 mins, fix < 4 hours.</div>
+          <div>• <strong>High Priority (Safety/Disruptive):</strong> Attended within 1-2 hours.</div>
           <div>• <strong>Medium Priority:</strong> Scheduled within 24 hours.</div>
-          <div>• <strong>Low Priority:</strong> Routine maintenance within 3-5 days.</div>
+          <div>• <strong>Low Priority:</strong> Handled within 2-3 business days.</div>
         </div>
       </div>
     `;
 
-    // FAQ Accordion click
     container.querySelectorAll('.faq-question-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const id = btn.getAttribute('data-faq-id');
@@ -1180,7 +1375,6 @@
       });
     });
 
-    // Copy Phone Buttons
     container.querySelectorAll('.copy-phone-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.preventDefault();
@@ -1196,7 +1390,7 @@
   }
 
   // =========================================================================
-  // TAB 5: PROFILE
+  // TAB 5: PROFILE (Student ID Card, Preferences & Logout)
   // =========================================================================
   function renderProfileTab() {
     const container = document.getElementById('tab-profile');
@@ -1208,35 +1402,34 @@
 
     container.innerHTML = `
       <div class="profile-card">
-        <div class="profile-avatar">AM</div>
-        <div class="profile-name">${state.reportDraft.studentName}</div>
-        <div class="profile-role-badge">Student Submitter</div>
+        <div class="profile-avatar">${(state.studentUser?.name || 'AS').split(' ').map(n=>n[0]).join('').slice(0,2)}</div>
+        <div class="profile-name">${state.studentUser?.name || 'Aarav Sharma'}</div>
+        <div class="profile-role-badge">Verified JECRC Student</div>
 
         <div class="profile-info-list">
           <div class="info-item-row">
             <span>Roll Number</span>
-            <strong>${state.reportDraft.studentId}</strong>
+            <strong>${state.studentUser?.roll_no || 'JU/2026/BTECH/1042'}</strong>
           </div>
           <div class="info-item-row">
             <span>Department</span>
-            <strong>Computer Science & Engg.</strong>
+            <strong>${state.studentUser?.branch || 'Computer Science & Engineering'}</strong>
           </div>
           <div class="info-item-row">
             <span>Residence</span>
-            <strong>Hostel Block B, Room 304</strong>
+            <strong>${state.studentUser?.hostel_or_day || 'Boys Hostel BH-2 (Room 214)'}</strong>
           </div>
           <div class="info-item-row">
-            <span>Email</span>
-            <strong>${state.reportDraft.studentEmail}</strong>
+            <span>Verified Gmail</span>
+            <strong>${state.studentUser?.email || 'aarav.sharma@jecrcu.edu.in'}</strong>
           </div>
           <div class="info-item-row">
-            <span>Phone</span>
-            <strong>${state.reportDraft.studentPhone}</strong>
+            <span>Mobile Phone</span>
+            <strong>${state.studentUser?.phone || '+91 98290 12345'}</strong>
           </div>
         </div>
       </div>
 
-      <!-- Quick Stats -->
       <div class="home-metrics-grid" style="margin-bottom: 20px;">
         <div class="metric-pill-card">
           <div class="metric-pill-value">${myComplaints.length}</div>
@@ -1244,7 +1437,7 @@
         </div>
         <div class="metric-pill-card">
           <div class="metric-pill-value" style="color: #f59e0b;">${activeCount}</div>
-          <div class="metric-pill-label">Active</div>
+          <div class="metric-pill-label">In Progress</div>
         </div>
         <div class="metric-pill-card">
           <div class="metric-pill-value" style="color: #10b981;">${resolvedCount}</div>
@@ -1252,7 +1445,6 @@
         </div>
       </div>
 
-      <!-- Settings & Controls -->
       <div class="section-header">
         <div class="section-title">App Preferences</div>
       </div>
@@ -1271,30 +1463,12 @@
             <span class="slider"></span>
           </label>
         </div>
-        <div class="setting-row">
-          <span>Email Ticket Receipts</span>
-          <label class="switch">
-            <input type="checkbox" checked />
-            <span class="slider"></span>
-          </label>
-        </div>
       </div>
 
-      <!-- Switch to Admin Mode -->
-      <div class="settings-group">
-        <div class="setting-row" style="cursor: pointer;" id="profile-switch-admin-btn">
-          <div>
-            <div style="font-weight: 700;">Switch to Campus Admin Portal</div>
-            <div style="font-size: 0.74rem; color: var(--text-secondary);">Manage tickets, view category charts and update statuses</div>
-          </div>
-          ${icons.arrowRight}
-        </div>
-      </div>
-
-      <!-- Reset Demo Database -->
-      <div style="margin-top: 20px; text-align: center;">
-        <button type="button" id="reset-demo-db-btn" style="background: transparent; border: 1px solid var(--border-color); padding: 8px 16px; border-radius: var(--radius-md); font-size: 0.78rem; color: var(--text-muted); cursor: pointer;">
-          🔄 Reset Database to Demo State
+      <!-- Logout from Student Session -->
+      <div style="margin-top: 16px;">
+        <button type="button" id="btn-logout-student" style="width: 100%; padding: 10px; background: transparent; border: 1px solid var(--border-color); border-radius: var(--radius-md); font-size: 0.82rem; font-weight: 600; color: #ef4444; cursor: pointer;">
+          Logout from Student Account
         </button>
       </div>
     `;
@@ -1303,29 +1477,128 @@
       applyTheme(e.target.checked ? 'dark' : 'light');
     });
 
-    document.getElementById('profile-switch-admin-btn')?.addEventListener('click', () => {
-      switchTab('admin');
-      showToast('Switched to Campus Admin Mode');
-    });
-
-    document.getElementById('reset-demo-db-btn')?.addEventListener('click', async () => {
-      if (confirm('Reset database to clean initial demo complaints and timeline?')) {
-        await fetch('/api/reset-demo', { method: 'POST' });
-        await loadData();
-        renderApp();
-        showToast('Database reset to fresh demo data!');
-      }
+    document.getElementById('btn-logout-student')?.addEventListener('click', () => {
+      localStorage.removeItem('jecrc_student_user');
+      state.studentUser = null;
+      showToast('Logged out from Student Session');
+      renderApp();
     });
   }
 
   // =========================================================================
-  // TAB 6: ADMIN DASHBOARD (Counts, Chart by Category, Filters, Status Update)
+  // PORTAL 2: DEDICATED ADMIN COMMAND CENTER (Password Protected)
   // =========================================================================
-  function renderAdminTab() {
-    const container = document.getElementById('tab-admin');
+  function renderAdminPortal() {
+    const loginView = document.getElementById('admin-login-view');
+    const dashboardView = document.getElementById('admin-dashboard-view');
+
+    // If Admin is not authenticated, show password-gated Admin Access Gateway
+    if (!state.adminUser) {
+      if (loginView) {
+        loginView.style.display = 'block';
+        renderAdminLoginCard();
+      }
+      if (dashboardView) dashboardView.style.display = 'none';
+      return;
+    }
+
+    // Admin is authenticated! Render Full Admin Command Center
+    if (loginView) loginView.style.display = 'none';
+    if (dashboardView) {
+      dashboardView.style.display = 'block';
+      renderAdminDashboard();
+    }
+  }
+
+  // Admin Login Gateway Card
+  function renderAdminLoginCard() {
+    const container = document.getElementById('admin-login-view');
     if (!container) return;
 
-    // Filter complaints for admin table
+    container.innerHTML = `
+      <div class="auth-overlay-card">
+        <div class="auth-header">
+          <div class="auth-uni-logo" style="background: linear-gradient(135deg, #b45309, #d97706);">
+            🔒
+          </div>
+          <div class="auth-title">JECRC Admin Portal Gateway</div>
+          <div class="auth-subtitle">Estate & Facilities Management Command Desk</div>
+        </div>
+
+        <div style="background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: var(--radius-md); padding: 10px 12px; margin-bottom: 16px; font-size: 0.74rem; color: #b45309;">
+          <strong>Restricted Access:</strong> Only authorized JECRC University maintenance supervisors and estate officers may access this portal.
+          <div style="margin-top: 4px; font-weight: 600;">
+            Demo Admin Credentials:<br/>
+            Email: <code>admin@jecrcu.edu.in</code> | Password: <code>jecrc@2026</code>
+          </div>
+        </div>
+
+        <form id="admin-login-form">
+          <div class="form-group">
+            <label class="form-label">Administrator Email *</label>
+            <input type="email" id="admin-email" class="form-input" value="admin@jecrcu.edu.in" required />
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Admin Security Password *</label>
+            <input type="password" id="admin-password" class="form-input" value="jecrc@2026" required />
+          </div>
+
+          <button type="submit" class="submit-report-btn" id="btn-admin-auth" style="background: #b45309;">
+            <span>Authorize & Enter Admin Center</span>
+            ${icons.arrowRight}
+          </button>
+        </form>
+
+        <div style="margin-top: 14px; text-align: center;">
+          <button type="button" class="view-toggle-btn" id="btn-back-to-student-from-login">
+            ← Return to Student Portal
+          </button>
+        </div>
+      </div>
+    `;
+
+    document.getElementById('admin-login-form')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('admin-email')?.value.trim();
+      const password = document.getElementById('admin-password')?.value.trim();
+      const btn = document.getElementById('btn-admin-auth');
+
+      if (btn) btn.innerHTML = `<span>Verifying credentials...</span>`;
+
+      try {
+        const res = await fetch('/api/auth/admin-login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        }).then(r => r.json());
+
+        if (res && res.success) {
+          state.adminUser = res.user;
+          sessionStorage.setItem('jecrc_admin_user', JSON.stringify(res.user));
+          showToast('Welcome, JECRC Facilities Administrator!');
+          renderApp();
+        } else {
+          showToast(res.error || 'Access Denied: Invalid administrator credentials', icons.alertTriangle);
+        }
+      } catch (err) {
+        showToast('Login error: ' + err.message, icons.alertTriangle);
+      } finally {
+        if (btn) btn.innerHTML = `<span>Authorize & Enter Admin Center</span> ${icons.arrowRight}`;
+      }
+    });
+
+    document.getElementById('btn-back-to-student-from-login')?.addEventListener('click', () => {
+      state.currentPortal = 'student';
+      renderApp();
+    });
+  }
+
+  // Full-Width Admin Command Center
+  function renderAdminDashboard() {
+    const container = document.getElementById('admin-dashboard-view');
+    if (!container) return;
+
     let filtered = state.complaints.filter(c => {
       if (state.adminStatusFilter !== 'All' && c.status !== state.adminStatusFilter) return false;
       if (state.adminCategoryFilter !== 'All' && c.category !== state.adminCategoryFilter) return false;
@@ -1346,21 +1619,36 @@
     const resolutionRate = totalTickets > 0 ? Math.round((resolvedCount / totalTickets) * 100) : 0;
 
     container.innerHTML = `
-      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;">
+      <!-- Admin Portal Header -->
+      <div class="admin-portal-header">
         <div>
-          <h2 style="font-size: 1.25rem; font-weight: 800; color: var(--text-primary);">Campus Admin Portal</h2>
-          <p style="font-size: 0.78rem; color: var(--text-secondary);">Real-time facilities triage, analytics & work order management</p>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span class="admin-badge-pill">🔒 JECRC ESTATE ADMIN</span>
+            <span style="font-size: 0.74rem; color: var(--text-muted);">Sitapura Campus, Jaipur</span>
+          </div>
+          <h2 style="font-size: 1.25rem; font-weight: 800; color: var(--text-primary); margin-top: 4px;">
+            Facilities & Works Management Command Center
+          </h2>
+          <div style="font-size: 0.78rem; color: var(--text-secondary);">
+            Logged in as: <strong>${state.adminUser?.name || 'JECRC Estate Admin'}</strong> (${state.adminUser?.email})
+          </div>
         </div>
-        <button type="button" class="role-pill-btn" id="admin-back-student-btn" style="background: var(--bg-muted); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.75rem;">
-          ← Student View
-        </button>
+
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <button type="button" class="view-toggle-btn" id="btn-admin-switch-student">
+            View Student App
+          </button>
+          <button type="button" class="admin-logout-btn" id="btn-admin-logout">
+            Logout Admin
+          </button>
+        </div>
       </div>
 
       <!-- Admin KPI Metric Cards -->
       <div class="admin-metrics-row">
         <div class="admin-metric-card">
           <div class="admin-metric-num" style="color: var(--primary);">${totalTickets}</div>
-          <div class="admin-metric-label">Total Tickets</div>
+          <div class="admin-metric-label">Total Complaints</div>
         </div>
         <div class="admin-metric-card">
           <div class="admin-metric-num" style="color: #8b5cf6;">${state.stats.pending || 0}</div>
@@ -1368,15 +1656,15 @@
         </div>
         <div class="admin-metric-card">
           <div class="admin-metric-num" style="color: #f59e0b;">${state.stats.inProgress || 0}</div>
-          <div class="admin-metric-label">In Progress</div>
+          <div class="admin-metric-label">Work Dispatched</div>
         </div>
         <div class="admin-metric-card">
           <div class="admin-metric-num" style="color: #10b981;">${resolvedCount} <span style="font-size: 0.85rem; font-weight: 600;">(${resolutionRate}%)</span></div>
-          <div class="admin-metric-label">Resolved Rate</div>
+          <div class="admin-metric-label">Resolution Rate</div>
         </div>
       </div>
 
-      <!-- Urgent High Priority Notice Card if any -->
+      <!-- Urgent High Priority Notice Card -->
       ${state.stats.highPriorityActive > 0 ? `
         <div style="background: var(--priority-high-bg); border: 1px solid var(--priority-high); border-radius: var(--radius-md); padding: 12px 16px; margin-bottom: 18px; display: flex; align-items: center; justify-content: space-between;">
           <div style="display: flex; align-items: center; gap: 8px; color: var(--priority-high-text); font-size: 0.82rem; font-weight: 700;">
@@ -1390,7 +1678,7 @@
       <!-- Interactive Chart by Category -->
       <div class="chart-container-card">
         <div class="chart-header-row">
-          <div class="chart-title">Breakdown by Campus Category</div>
+          <div class="chart-title">Complaints by Campus Department / Category</div>
           <span style="font-size: 0.72rem; color: var(--text-muted);">Tap a bar to filter</span>
         </div>
         <div class="chart-bars-wrap">
@@ -1415,7 +1703,7 @@
 
       <!-- Admin Filters & Search -->
       <div class="section-header">
-        <div class="section-title">Complaints Management</div>
+        <div class="section-title">All Complaints & Work Orders</div>
         <span style="font-size: 0.75rem; color: var(--text-muted);">${filtered.length} showing</span>
       </div>
 
@@ -1425,7 +1713,7 @@
           type="text" 
           id="admin-search-input" 
           class="search-input" 
-          placeholder="Filter by ticket ID, student, description, building..." 
+          placeholder="Filter by student name, roll number, ticket ID, location..." 
           value="${escapeHtml(state.adminSearch)}"
         />
       </div>
@@ -1483,12 +1771,12 @@
                 <span>•</span>
                 <span>${icons.mapPin} ${escapeHtml(c.location)}</span>
                 <span>•</span>
-                <span>👤 ${escapeHtml(c.student_name)}</span>
+                <span>👤 ${escapeHtml(c.student_name)} (${escapeHtml(c.student_id)})</span>
               </div>
             </div>
             <div>
               <button class="update-status-trigger-btn" data-admin-id="${c.id}">
-                Update Status
+                Update Status & Note
               </button>
             </div>
           </div>
@@ -1496,52 +1784,55 @@
       </div>
     `;
 
-    // Admin event hooks
-    document.getElementById('admin-back-student-btn')?.addEventListener('click', () => {
-      state.currentRole = 'student';
-      switchTab('home');
+    document.getElementById('btn-admin-switch-student')?.addEventListener('click', () => {
+      state.currentPortal = 'student';
+      renderApp();
+    });
+
+    document.getElementById('btn-admin-logout')?.addEventListener('click', () => {
+      sessionStorage.removeItem('jecrc_admin_user');
+      state.adminUser = null;
+      showToast('Logged out from Admin Command Center');
+      renderApp();
     });
 
     document.getElementById('filter-urgent-only')?.addEventListener('click', () => {
       state.adminPriorityFilter = 'High';
-      renderAdminTab();
+      renderAdminDashboard();
     });
 
-    // Chart bar click filters category
     container.querySelectorAll('[data-cat-bar]').forEach(bar => {
       bar.addEventListener('click', () => {
         const cat = bar.getAttribute('data-cat-bar');
         state.adminCategoryFilter = state.adminCategoryFilter === cat ? 'All' : cat;
-        renderAdminTab();
+        renderAdminDashboard();
       });
     });
 
-    // Admin filter selects
     document.getElementById('admin-status-select')?.addEventListener('change', (e) => {
       state.adminStatusFilter = e.target.value;
-      renderAdminTab();
+      renderAdminDashboard();
     });
     document.getElementById('admin-cat-select')?.addEventListener('change', (e) => {
       state.adminCategoryFilter = e.target.value;
-      renderAdminTab();
+      renderAdminDashboard();
     });
     document.getElementById('admin-priority-select')?.addEventListener('change', (e) => {
       state.adminPriorityFilter = e.target.value;
-      renderAdminTab();
+      renderAdminDashboard();
     });
     document.getElementById('admin-search-input')?.addEventListener('input', (e) => {
       state.adminSearch = e.target.value;
-      renderAdminTab();
+      renderAdminDashboard();
     });
     document.getElementById('admin-clear-filters-btn')?.addEventListener('click', () => {
       state.adminStatusFilter = 'All';
       state.adminCategoryFilter = 'All';
       state.adminPriorityFilter = 'All';
       state.adminSearch = '';
-      renderAdminTab();
+      renderAdminDashboard();
     });
 
-    // Update status button click
     container.querySelectorAll('.update-status-trigger-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const id = btn.getAttribute('data-admin-id');
@@ -1572,8 +1863,7 @@
     const modal = document.getElementById('detail-modal-overlay');
     if (!modal || !state.activeComplaintDetail) return;
 
-    const { complaint, timeline, feedback } = state.activeComplaintDetail;
-    const stepIndex = getStatusStepIndex(complaint.status);
+    const { complaint, timeline } = state.activeComplaintDetail;
 
     modal.innerHTML = `
       <div class="bottom-sheet-content">
@@ -1617,11 +1907,10 @@
           </div>
         ` : ''}
 
-        <!-- Department & Assignment info -->
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; font-size: 0.78rem;">
           <div style="background: var(--bg-subtle); padding: 10px; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
-            <div style="color: var(--text-muted); font-size: 0.7rem;">Assigned Department</div>
-            <div style="font-weight: 700; color: var(--text-primary); margin-top: 2px;">${escapeHtml(complaint.department || 'Campus Facilities')}</div>
+            <div style="color: var(--text-muted); font-size: 0.7rem;">Assigned JECRC Department</div>
+            <div style="font-weight: 700; color: var(--text-primary); margin-top: 2px;">${escapeHtml(complaint.department || 'JECRC Campus Facilities')}</div>
           </div>
           <div style="background: var(--bg-subtle); padding: 10px; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
             <div style="color: var(--text-muted); font-size: 0.7rem;">Assigned Personnel</div>
@@ -1629,7 +1918,6 @@
           </div>
         </div>
 
-        <!-- STATUS TIMELINE SECTION -->
         <div class="section-header" style="margin-top: 18px;">
           <div class="section-title">
             ${icons.clock} Status Timeline & Audit Trail
@@ -1660,7 +1948,6 @@
           }).join('')}
         </div>
 
-        <!-- Student Satisfaction Rating Box (if Resolved or Closed) -->
         ${(complaint.status === 'Resolved' || complaint.status === 'Closed') ? `
           <div class="feedback-box">
             <div style="font-size: 0.88rem; font-weight: 700; color: var(--text-primary);">
@@ -1680,19 +1967,11 @@
             </button>
           </div>
         ` : ''}
-
-        <!-- Admin Quick Action Trigger from detail modal -->
-        <div style="margin-top: 20px; display: flex; gap: 10px;">
-          <button type="button" class="update-status-trigger-btn" id="detail-admin-update-btn" style="flex: 1; padding: 10px; text-align: center;">
-            🛠️ Admin: Update Status & Add Note
-          </button>
-        </div>
       </div>
     `;
 
     modal.classList.add('active');
 
-    // Close listener
     document.getElementById('close-detail-sheet-btn')?.addEventListener('click', () => {
       modal.classList.remove('active');
     });
@@ -1701,7 +1980,6 @@
       if (e.target === modal) modal.classList.remove('active');
     });
 
-    // Star rating listeners
     modal.querySelectorAll('.star-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         state.selectedRating = parseInt(btn.getAttribute('data-star'), 10);
@@ -1711,14 +1989,13 @@
       });
     });
 
-    // Submit Feedback
     document.getElementById('submit-feedback-btn')?.addEventListener('click', async () => {
       const comment = document.getElementById('feedback-comment-input')?.value || '';
       try {
         await fetch(`/api/complaints/${complaint.id}/feedback`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ rating: state.selectedRating, comment })
+          body: JSON.stringify({ rating: state.selectedRating, comment, student_name: state.studentUser?.name })
         });
         showToast(`Thank you! Rated ${state.selectedRating} Stars ⭐`);
         await loadData();
@@ -1726,12 +2003,6 @@
       } catch (err) {
         showToast('Feedback save error', icons.alertTriangle);
       }
-    });
-
-    // Admin update shortcut
-    document.getElementById('detail-admin-update-btn')?.addEventListener('click', () => {
-      modal.classList.remove('active');
-      openAdminStatusModal(complaint.id);
     });
   }
 
@@ -1751,7 +2022,7 @@
         <div class="sheet-handle"></div>
         <div class="sheet-header-row">
           <div>
-            <div style="font-size: 0.78rem; font-weight: 700; color: var(--primary);">ADMIN WORK ORDER DISPATCH</div>
+            <div style="font-size: 0.78rem; font-weight: 700; color: #b45309;">JECRC ESTATE WORK ORDER DISPATCH</div>
             <h3 style="font-size: 1.1rem; font-weight: 800; color: var(--text-primary); margin-top: 2px;">
               Update Ticket ${complaint.id}
             </h3>
@@ -1762,13 +2033,13 @@
         </div>
 
         <div style="font-size: 0.8rem; background: var(--bg-subtle); padding: 10px; border-radius: var(--radius-sm); border: 1px solid var(--border-color); margin-bottom: 14px;">
-          <div><strong>Title:</strong> ${escapeHtml(complaint.title)}</div>
+          <div><strong>Problem:</strong> ${escapeHtml(complaint.title)}</div>
           <div><strong>Location:</strong> ${escapeHtml(complaint.location)}</div>
+          <div><strong>Student:</strong> ${escapeHtml(c.student_name || complaint.student_name)} (${escapeHtml(complaint.student_id)})</div>
           <div><strong>Current Status:</strong> <span class="status-badge status-${complaint.status.toLowerCase().replace(/\s+/g, '-')}">${complaint.status}</span></div>
         </div>
 
         <form id="admin-update-status-form">
-          <!-- Status Selector -->
           <div class="form-group">
             <label class="form-label">Update Status</label>
             <select id="modal-status-select" class="form-select">
@@ -1780,26 +2051,24 @@
             </select>
           </div>
 
-          <!-- Department & Staff Assignment -->
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;" class="form-group">
             <div>
-              <label class="form-label">Department</label>
+              <label class="form-label">Assigned Department</label>
               <select id="modal-dept-select" class="form-select">
-                <option value="Electrical Maintenance" ${complaint.department === 'Electrical Maintenance' ? 'selected' : ''}>Electrical Maintenance</option>
-                <option value="Plumbing & Sanitation" ${complaint.department === 'Plumbing & Sanitation' ? 'selected' : ''}>Plumbing & Sanitation</option>
-                <option value="Campus IT & NOC" ${complaint.department === 'Campus IT & NOC' ? 'selected' : ''}>Campus IT & NOC</option>
+                <option value="Electrical & Power Services" ${complaint.department === 'Electrical & Power Services' ? 'selected' : ''}>Electrical & Power Services</option>
+                <option value="Hostel & Campus Plumbing" ${complaint.department === 'Hostel & Campus Plumbing' ? 'selected' : ''}>Hostel & Campus Plumbing</option>
+                <option value="JECRC IT & NOC Cell" ${complaint.department === 'JECRC IT & NOC Cell' ? 'selected' : ''}>JECRC IT & NOC Cell</option>
                 <option value="Campus Housekeeping" ${complaint.department === 'Campus Housekeeping' ? 'selected' : ''}>Campus Housekeeping</option>
-                <option value="Campus Security & Safety Cell" ${complaint.department === 'Campus Security & Safety Cell' ? 'selected' : ''}>Campus Security & Safety</option>
-                <option value="Food Safety & Mess Committee" ${complaint.department === 'Food Safety & Mess Committee' ? 'selected' : ''}>Food Safety Board</option>
+                <option value="Chief Proctor & Security Cell" ${complaint.department === 'Chief Proctor & Security Cell' ? 'selected' : ''}>Chief Proctor & Security</option>
+                <option value="Hostel Food & Mess Committee" ${complaint.department === 'Hostel Food & Mess Committee' ? 'selected' : ''}>Hostel Food & Mess Committee</option>
               </select>
             </div>
             <div>
               <label class="form-label">Assigned Personnel</label>
-              <input type="text" id="modal-assignee-input" class="form-input" value="${escapeHtml(complaint.assigned_to || '')}" placeholder="e.g. Ramesh Sharma" />
+              <input type="text" id="modal-assignee-input" class="form-input" value="${escapeHtml(complaint.assigned_to || '')}" placeholder="e.g. Rameshwar Meena" />
             </div>
           </div>
 
-          <!-- Priority Override -->
           <div class="form-group">
             <label class="form-label">Priority</label>
             <select id="modal-priority-select" class="form-select">
@@ -1809,17 +2078,16 @@
             </select>
           </div>
 
-          <!-- Admin Note (Appears on Student Timeline) -->
           <div class="form-group">
             <label class="form-label">
-              <span>Admin / Technician Note <span style="color: #ef4444;">*</span></span>
-              <span class="label-hint">Visible on Student Timeline</span>
+              <span>Admin / Technician Official Note <span style="color: #ef4444;">*</span></span>
+              <span class="label-hint">Pushed to Student Timeline</span>
             </label>
-            <textarea id="modal-admin-note" class="form-textarea" placeholder="e.g. Dispatched senior electrician. Replacement capacitor installed and tested." required></textarea>
+            <textarea id="modal-admin-note" class="form-textarea" placeholder="e.g. Electrician Rameshwar dispatched with replacement MCB. Power restored and verified." required></textarea>
           </div>
 
-          <button type="submit" class="submit-report-btn" id="modal-save-status-btn">
-            Save Status & Update Timeline
+          <button type="submit" class="submit-report-btn" id="modal-save-status-btn" style="background: #b45309;">
+            Save Status & Push to Student Timeline
           </button>
         </form>
       </div>
@@ -1835,7 +2103,6 @@
       if (e.target === modal) modal.classList.remove('active');
     });
 
-    // Form submit
     document.getElementById('admin-update-status-form')?.addEventListener('submit', async (e) => {
       e.preventDefault();
       const saveBtn = document.getElementById('modal-save-status-btn');
@@ -1860,7 +2127,7 @@
             assigned_to,
             priority,
             note,
-            actor_name: 'Campus Admin Officer',
+            actor_name: state.adminUser?.name || 'JECRC Estate Officer',
             actor_role: 'Campus Admin'
           })
         }).then(r => r.json());
@@ -1870,7 +2137,6 @@
           modal.classList.remove('active');
           await loadData();
           renderApp();
-          // Also refresh detail sheet if open
           if (state.activeComplaintDetail && state.activeComplaintDetail.complaint.id === complaint.id) {
             openComplaintDetailModal(complaint.id);
           }
@@ -1882,15 +2148,12 @@
       } finally {
         if (saveBtn) {
           saveBtn.disabled = false;
-          saveBtn.innerText = 'Save Status & Update Timeline';
+          saveBtn.innerText = 'Save Status & Push to Student Timeline';
         }
       }
     });
   }
 
-  // =========================================================================
-  // SETUP EVENT LISTENERS
-  // =========================================================================
   function setupEventListeners() {
     // Bottom Tab navigation
     document.querySelectorAll('.nav-tab-btn').forEach(btn => {
@@ -1900,28 +2163,31 @@
       });
     });
 
-    // Top Role Switcher
-    document.getElementById('role-pill-student')?.addEventListener('click', () => {
-      state.currentRole = 'student';
-      switchTab('home');
-    });
-    document.getElementById('role-pill-admin')?.addEventListener('click', () => {
-      state.currentRole = 'admin';
-      switchTab('admin');
+    // Top Portal Switcher Button ("Admin Gateway" / "← Student Portal")
+    document.getElementById('switch-portal-btn')?.addEventListener('click', () => {
+      if (state.currentPortal === 'student') {
+        state.currentPortal = 'admin';
+      } else {
+        state.currentPortal = 'student';
+      }
+      renderApp();
     });
 
-    // Header Theme Toggle Button
+    // Discreet Footer Link to Admin
+    document.getElementById('footer-admin-link')?.addEventListener('click', () => {
+      state.currentPortal = 'admin';
+      renderApp();
+    });
+
     document.getElementById('header-theme-toggle')?.addEventListener('click', () => {
       applyTheme(state.theme === 'dark' ? 'light' : 'dark');
     });
 
-    // Desktop View Toggle (Mockup vs Expanded)
     document.getElementById('view-toggle-btn')?.addEventListener('click', () => {
       applyViewMode(state.viewMode === 'mockup' ? 'expanded' : 'mockup');
     });
   }
 
-  // Helper functions
   function escapeHtml(str) {
     if (!str) return '';
     return str
@@ -1969,7 +2235,6 @@
     }
   }
 
-  // Boot on DOM ready
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
   } else {

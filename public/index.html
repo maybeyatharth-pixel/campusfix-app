@@ -3,16 +3,30 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-  <meta name="theme-color" content="#2563eb" />
-  <meta name="description" content="CampusFix - Mobile-First Campus Problem Reporting & Facilities Resolution Platform" />
-  <title>CampusFix - Campus Problem Reporting</title>
+  <meta name="theme-color" content="#1e3a8a" />
+  <meta name="description" content="CampusFix - Official JECRC University Jaipur Campus Problem Reporting & Facilities Resolution Platform" />
+  <title>CampusFix - JECRC University, Jaipur</title>
   
   <link rel="stylesheet" href="styles.css" />
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛠️</text></svg>" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏛️</text></svg>" />
 </head>
 <body>
 
-  <!-- Top Controls Bar (Visible on Desktop / Tablet for quick view & role switching) -->
+  <!-- JECRC University Official Header Strip -->
+  <div class="university-brand-strip">
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <span>🏛️ JECRC UNIVERSITY</span>
+      <span style="opacity: 0.6;">|</span>
+      <span class="uni-location">Sitapura Industrial Area, Jaipur (Rajasthan) - 303905</span>
+    </div>
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <span style="font-size: 0.68rem; background: rgba(251, 191, 36, 0.2); padding: 2px 8px; border-radius: 4px; color: #fef08a;">
+        CampusFix Facilities Desk
+      </span>
+    </div>
+  </div>
+
+  <!-- Top Controls Bar -->
   <header class="view-control-bar">
     <div class="view-control-left">
       <div class="campusfix-brand-logo">
@@ -30,13 +44,14 @@
     </div>
 
     <div class="view-control-right">
-      <!-- Role Switcher: Student ↔ Admin -->
-      <div class="role-switch-pill">
-        <button type="button" class="role-pill-btn active" id="role-pill-student">
-          👤 Student Mode
-        </button>
-        <button type="button" class="role-pill-btn" id="role-pill-admin">
-          🛠️ Admin Portal
+      <!-- Portal Mode Indicator / Switcher -->
+      <div id="portal-nav-controls" style="display: flex; align-items: center; gap: 8px;">
+        <span id="active-user-badge" style="font-size: 0.78rem; font-weight: 600; color: var(--text-secondary); display: none;"></span>
+        
+        <!-- Discreet Admin Portal Button (Protected by password) -->
+        <button type="button" class="view-toggle-btn" id="switch-portal-btn" style="border-color: #f59e0b; color: #b45309; font-weight: 700;">
+          <span>🔒</span>
+          <span id="portal-btn-label">Admin Gateway</span>
         </button>
       </div>
 
@@ -51,116 +66,138 @@
     </div>
   </header>
 
-  <!-- Mobile Viewport / Frame Container -->
-  <div class="phone-frame-wrapper" id="phone-frame-wrapper">
-    <div class="app-container" id="app-container">
+  <!-- ========================================================
+       SECTION A: STUDENT PORTAL (Mobile-First Shell)
+       ======================================================== -->
+  <div id="student-portal-section">
+    <!-- Mobile Viewport / Frame Container -->
+    <div class="phone-frame-wrapper" id="phone-frame-wrapper">
+      <div class="app-container" id="app-container">
 
-      <!-- Simulated Phone Status Bar -->
-      <div class="phone-status-bar">
-        <span>9:41</span>
-        <div class="dynamic-island">
-          <div class="island-camera"></div>
-          <div class="island-sensor"></div>
-        </div>
-        <div style="display: flex; align-items: center; gap: 4px; font-size: 0.72rem;">
-          <span>5G</span>
-          <span>100%</span>
-        </div>
-      </div>
-
-      <!-- App Header -->
-      <div class="app-header">
-        <div class="header-title-wrap">
-          <div class="header-logo-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
-            </svg>
+        <!-- Simulated Phone Status Bar -->
+        <div class="phone-status-bar">
+          <span>9:41</span>
+          <div class="dynamic-island">
+            <div class="island-camera"></div>
+            <div class="island-sensor"></div>
           </div>
-          <div>
-            <div style="display: flex; align-items: center;">
-              <span class="header-app-name">CampusFix</span>
-              <span class="header-sub-badge">v1.2</span>
+          <div style="display: flex; align-items: center; gap: 4px; font-size: 0.72rem;">
+            <span>5G</span>
+            <span>100%</span>
+          </div>
+        </div>
+
+        <!-- Student App Header -->
+        <div class="app-header">
+          <div class="header-title-wrap">
+            <div class="header-logo-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+              </svg>
             </div>
-            <div style="font-size: 0.68rem; color: var(--text-muted); font-weight: 500;">National Campus Network</div>
+            <div>
+              <div style="display: flex; align-items: center;">
+                <span class="header-app-name">JECRC CampusFix</span>
+                <span class="header-sub-badge">Jaipur</span>
+              </div>
+              <div style="font-size: 0.68rem; color: var(--text-muted); font-weight: 500;">JECRC University • Student Portal</div>
+            </div>
+          </div>
+
+          <div class="header-actions">
+            <button type="button" class="icon-button" id="header-notif-btn" title="Live Campus Alert Status">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/>
+                <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>
+              </svg>
+            </button>
           </div>
         </div>
 
-        <div class="header-actions">
-          <button type="button" class="icon-button" id="header-notif-btn" title="Live Campus Alert Status">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
-              <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/>
-              <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>
-            </svg>
+        <!-- Main Scrollable App Content Area -->
+        <main class="app-content" id="app-content">
+          <!-- AUTH SCREEN FOR STUDENTS (Shown if student is not registered/verified) -->
+          <section id="student-auth-view" style="display: none;"></section>
+
+          <!-- TAB 1: HOME -->
+          <section id="tab-home" class="tab-panel active"></section>
+
+          <!-- TAB 2: REPORT -->
+          <section id="tab-report" class="tab-panel"></section>
+
+          <!-- TAB 3: TRACK -->
+          <section id="tab-track" class="tab-panel"></section>
+
+          <!-- TAB 4: HELP -->
+          <section id="tab-help" class="tab-panel"></section>
+
+          <!-- TAB 5: PROFILE -->
+          <section id="tab-profile" class="tab-panel"></section>
+
+          <!-- Discreet Footer Link to Admin Portal -->
+          <div class="portal-discreet-footer">
+            <span>JECRC University Facilities Management • </span>
+            <button type="button" id="footer-admin-link">Staff Administration Access</button>
+          </div>
+        </main>
+
+        <!-- Bottom Tabs Navigation Bar for Students -->
+        <nav class="bottom-nav" id="bottom-nav">
+          <!-- 1. Home -->
+          <button type="button" class="nav-tab-btn active" data-tab="home">
+            <div class="nav-tab-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            </div>
+            <span class="nav-tab-label">Home</span>
           </button>
-        </div>
+
+          <!-- 2. Track -->
+          <button type="button" class="nav-tab-btn" data-tab="track">
+            <div class="nav-tab-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              <span class="nav-badge-dot"></span>
+            </div>
+            <span class="nav-tab-label">Track</span>
+          </button>
+
+          <!-- 3. Report (Center Action) -->
+          <button type="button" class="nav-tab-btn report-tab-btn" data-tab="report">
+            <div class="nav-tab-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            </div>
+            <span class="nav-tab-label" style="font-weight: 700; color: var(--primary);">Report</span>
+          </button>
+
+          <!-- 4. Help -->
+          <button type="button" class="nav-tab-btn" data-tab="help">
+            <div class="nav-tab-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            </div>
+            <span class="nav-tab-label">Help</span>
+          </button>
+
+          <!-- 5. Profile -->
+          <button type="button" class="nav-tab-btn" data-tab="profile">
+            <div class="nav-tab-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            </div>
+            <span class="nav-tab-label">Profile</span>
+          </button>
+        </nav>
+
       </div>
-
-      <!-- Main Scrollable App Content Area -->
-      <main class="app-content" id="app-content">
-        <!-- TAB 1: HOME -->
-        <section id="tab-home" class="tab-panel active"></section>
-
-        <!-- TAB 2: REPORT -->
-        <section id="tab-report" class="tab-panel"></section>
-
-        <!-- TAB 3: TRACK -->
-        <section id="tab-track" class="tab-panel"></section>
-
-        <!-- TAB 4: HELP -->
-        <section id="tab-help" class="tab-panel"></section>
-
-        <!-- TAB 5: PROFILE -->
-        <section id="tab-profile" class="tab-panel"></section>
-
-        <!-- TAB 6: ADMIN DASHBOARD -->
-        <section id="tab-admin" class="tab-panel"></section>
-      </main>
-
-      <!-- Bottom Tabs Navigation Bar -->
-      <nav class="bottom-nav" id="bottom-nav">
-        <!-- 1. Home -->
-        <button type="button" class="nav-tab-btn active" data-tab="home">
-          <div class="nav-tab-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-          </div>
-          <span class="nav-tab-label">Home</span>
-        </button>
-
-        <!-- 2. Track -->
-        <button type="button" class="nav-tab-btn" data-tab="track">
-          <div class="nav-tab-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-            <span class="nav-badge-dot"></span>
-          </div>
-          <span class="nav-tab-label">Track</span>
-        </button>
-
-        <!-- 3. Report (Center Action) -->
-        <button type="button" class="nav-tab-btn report-tab-btn" data-tab="report">
-          <div class="nav-tab-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          </div>
-          <span class="nav-tab-label" style="font-weight: 700; color: var(--primary);">Report</span>
-        </button>
-
-        <!-- 4. Help -->
-        <button type="button" class="nav-tab-btn" data-tab="help">
-          <div class="nav-tab-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-          </div>
-          <span class="nav-tab-label">Help</span>
-        </button>
-
-        <!-- 5. Profile -->
-        <button type="button" class="nav-tab-btn" data-tab="profile">
-          <div class="nav-tab-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-          </div>
-          <span class="nav-tab-label">Profile</span>
-        </button>
-      </nav>
-
     </div>
+  </div>
+
+  <!-- ========================================================
+       SECTION B: DEDICATED ADMIN COMMAND PORTAL (Password Protected)
+       ======================================================== -->
+  <div id="admin-portal-section" class="admin-fullscreen-container">
+    <!-- Admin Login Card (Shown if admin is not authenticated) -->
+    <div id="admin-login-view" style="max-width: 440px; margin: 40px auto;"></div>
+
+    <!-- Admin Dashboard (Shown only when authenticated) -->
+    <div id="admin-dashboard-view" style="display: none;"></div>
   </div>
 
   <!-- Detail & Status Timeline Bottom Sheet Modal -->
