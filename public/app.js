@@ -279,17 +279,12 @@
     setupEventListeners();
     await loadData();
 
-    // Default student user fallback if none exists (Aarav Sharma - verified)
-    if (!state.studentUser) {
-      state.studentUser = {
-        name: 'Aarav Sharma',
-        email: 'aarav.sharma@jecrcu.edu.in',
-        roll_no: 'JU/2026/BTECH/1042',
-        branch: 'Computer Science & Engineering',
-        hostel_or_day: 'Boys Hostel BH-2 (Room 214)',
-        phone: '+91 98290 12345'
-      };
-      localStorage.setItem('jecrc_student_user', JSON.stringify(state.studentUser));
+    // Check if a portal is specified in URL query or hash (e.g. ?portal=admin or #admin)
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('portal') === 'admin' || window.location.hash === '#admin') {
+      state.currentPortal = 'admin';
+    } else {
+      state.currentPortal = 'student';
     }
 
     renderApp();
@@ -363,14 +358,16 @@
     if (state.currentPortal === 'student') {
       if (studentSection) studentSection.style.display = 'block';
       if (adminSection) adminSection.style.display = 'none';
-      if (portalBtnLabel) portalBtnLabel.innerText = 'Admin Gateway';
+      if (portalBtnLabel) portalBtnLabel.innerText = '🔒 Admin Portal (Staff)';
 
       if (userBadge) {
+        userBadge.style.display = 'inline-block';
         if (state.studentUser) {
-          userBadge.style.display = 'inline-block';
-          userBadge.innerText = `👤 ${state.studentUser.name}`;
+          userBadge.innerText = `🎓 Verified: ${state.studentUser.name.split(' ')[0]}`;
+          userBadge.style.color = 'var(--accent-green)';
         } else {
-          userBadge.style.display = 'none';
+          userBadge.innerText = `⚠️ Unverified Student`;
+          userBadge.style.color = '#f59e0b';
         }
       }
 
@@ -378,10 +375,16 @@
     } else {
       if (studentSection) studentSection.style.display = 'none';
       if (adminSection) adminSection.style.display = 'block';
-      if (portalBtnLabel) portalBtnLabel.innerText = '← Student Portal';
+      if (portalBtnLabel) portalBtnLabel.innerText = '🎓 Student Portal';
       if (userBadge) {
         userBadge.style.display = 'inline-block';
-        userBadge.innerText = state.adminUser ? '🛡️ Admin Officer' : '🔒 Admin Auth';
+        if (state.adminUser) {
+          userBadge.innerText = `🛡️ Admin: ${state.adminUser.name.split(' ')[0]}`;
+          userBadge.style.color = '#3b82f6';
+        } else {
+          userBadge.innerText = `🔒 Admin Auth Required`;
+          userBadge.style.color = '#ef4444';
+        }
       }
 
       renderAdminPortal();
