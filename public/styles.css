@@ -2170,3 +2170,16 @@ input:checked + .slider:before {
 .portal-discreet-footer a:hover, .portal-discreet-footer button:hover {
   color: var(--primary);
 }
+
+/* Password Eye Toggle */
+.password-eye-btn {
+  transition: color 0.15s ease, transform 0.1s ease;
+}
+
+.password-eye-btn:hover {
+  color: var(--text-primary) !important;
+}
+
+.password-eye-btn:active {
+  transform: scale(0.92);
+}

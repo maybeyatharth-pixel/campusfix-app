@@ -58,9 +58,9 @@
     currentTab: 'home', // 'home' | 'report' | 'track' | 'help' | 'profile'
     theme: localStorage.getItem('jecrc_theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
 
-    // Authenticated users
+    // Authenticated users (No credentials stored in localStorage/sessionStorage/cookies/URLs)
     studentUser: JSON.parse(localStorage.getItem('jecrc_student_user') || 'null'),
-    adminUser: JSON.parse(sessionStorage.getItem('jecrc_admin_user') || 'null'),
+    adminUser: null,
 
     // OTP verification draft
     pendingStudentAuth: null,
@@ -490,19 +490,9 @@
         }
       };
     },
-    adminLogin(email, password) {
-      if ((email || '').trim().toLowerCase() === 'admin@jecrcu.edu.in' && (password || '').trim() === 'jecrc@2026') {
-        return {
-          success: true,
-          user: {
-            name: 'JECRC Facilities Officer',
-            email: 'admin@jecrcu.edu.in',
-            role: 'admin',
-            department: 'Estate & Works'
-          }
-        };
-      }
-      return { success: false, error: 'Invalid JECRC Admin credentials. Please check your admin email and password.' };
+    adminLogin() {
+      // Backend auth only: No hardcoded credentials or frontend comparisons
+      return { success: false, error: 'Invalid credentials' };
     },
     addComplaint(c) {
       const db = this.getDb();
@@ -557,6 +547,8 @@
   };
 
   const icons = {
+    eye: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>`,
+    eyeOff: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>`,
     home: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`,
     plusCircle: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>`,
     clock: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`,
@@ -709,7 +701,6 @@
           if (profile) {
             if (profile.role === 'admin') {
               state.adminUser = profile;
-              sessionStorage.setItem('jecrc_admin_user', JSON.stringify(profile));
             } else {
               state.studentUser = profile;
               localStorage.setItem('jecrc_student_user', JSON.stringify(profile));
@@ -722,7 +713,6 @@
             state.studentUser = null;
             state.adminUser = null;
             localStorage.removeItem('jecrc_student_user');
-            sessionStorage.removeItem('jecrc_admin_user');
             renderApp();
           }
         });
@@ -2225,7 +2215,14 @@
     }
   }
 
-  // Admin Login Gateway Card
+  // Admin Authentication State (5 Wrong Attempts Lockout Tracker)
+  const adminAuthState = {
+    failedAttempts: parseInt(sessionStorage.getItem('cf_admin_fail_count') || '0', 10),
+    lockoutUntil: parseInt(sessionStorage.getItem('cf_admin_lockout_until') || '0', 10),
+    lockoutTimer: null
+  };
+
+  // Admin Login Gateway Card (Secure, Empty Fields, autocomplete="off", Password Eye Toggle, Backend Only Auth, Lockout)
   function renderAdminLoginCard() {
     const container = document.getElementById('admin-login-view');
     if (!container) return;
@@ -2241,22 +2238,25 @@
         </div>
 
         <div style="background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: var(--radius-md); padding: 10px 12px; margin-bottom: 16px; font-size: 0.74rem; color: #b45309;">
-          <strong>Restricted Access:</strong> Only authorized JECRC University maintenance supervisors and estate officers may access this portal.
-          <div style="margin-top: 4px; font-weight: 600;">
-            Demo Admin Credentials:<br/>
-            Email: <code>admin@jecrcu.edu.in</code> | Password: <code>jecrc@2026</code>
-          </div>
+          <strong>Restricted Access:</strong> Only authorized JECRC University maintenance supervisors and estate officers with administrator privileges may access this portal.
         </div>
 
-        <form id="admin-login-form">
+        <div id="admin-login-error-banner" style="display: none; background: #fee2e2; border: 1px solid #f87171; color: #b91c1c; padding: 10px 12px; border-radius: var(--radius-md); font-size: 0.78rem; margin-bottom: 14px;"></div>
+
+        <form id="admin-login-form" autocomplete="off">
           <div class="form-group">
             <label class="form-label">Administrator Email *</label>
-            <input type="email" id="admin-email" class="form-input" value="admin@jecrcu.edu.in" required />
+            <input type="email" id="admin-email" class="form-input" placeholder="Enter administrator email" autocomplete="off" required />
           </div>
 
           <div class="form-group">
             <label class="form-label">Admin Security Password *</label>
-            <input type="password" id="admin-password" class="form-input" value="jecrc@2026" required />
+            <div class="password-input-wrap" style="position: relative; display: flex; align-items: center;">
+              <input type="password" id="admin-password" class="form-input" placeholder="Enter admin password" autocomplete="new-password" style="padding-right: 42px;" required />
+              <button type="button" id="toggle-admin-password-btn" class="password-eye-btn" aria-label="Toggle password visibility" style="position: absolute; right: 10px; background: none; border: none; cursor: pointer; color: var(--text-muted); padding: 4px; display: flex; align-items: center; justify-content: center;">
+                ${icons.eye}
+              </button>
+            </div>
           </div>
 
           <button type="submit" class="submit-report-btn" id="btn-admin-auth" style="background: #b45309;">
@@ -2266,67 +2266,157 @@
         </form>
 
         <div style="margin-top: 14px; text-align: center;">
-          <button type="button" class="view-toggle-btn" id="btn-back-to-student-from-login">
+          <button type="button" class="portal-switch-btn" id="btn-back-to-student-from-login">
             ← Return to Student Portal
           </button>
         </div>
       </div>
     `;
 
+    // Password Show/Hide Eye Toggle
+    const passInput = document.getElementById('admin-password');
+    const eyeBtn = document.getElementById('toggle-admin-password-btn');
+    if (passInput && eyeBtn) {
+      eyeBtn.addEventListener('click', () => {
+        const isPassword = passInput.type === 'password';
+        passInput.type = isPassword ? 'text' : 'password';
+        eyeBtn.innerHTML = isPassword ? icons.eyeOff : icons.eye;
+      });
+    }
+
+    // Lockout Management UI
+    function updateLockoutUI() {
+      const now = Date.now();
+      const errBanner = document.getElementById('admin-login-error-banner');
+      const authBtn = document.getElementById('btn-admin-auth');
+      const emailInput = document.getElementById('admin-email');
+      const pInput = document.getElementById('admin-password');
+
+      if (adminAuthState.lockoutUntil && now < adminAuthState.lockoutUntil) {
+        const remaining = Math.ceil((adminAuthState.lockoutUntil - now) / 1000);
+        if (errBanner) {
+          errBanner.style.display = 'block';
+          errBanner.innerText = `⛔ Account temporarily locked due to 5 failed attempts. Please wait ${remaining}s before retrying.`;
+        }
+        if (authBtn) {
+          authBtn.disabled = true;
+          authBtn.innerText = `Locked (${remaining}s)`;
+        }
+        if (emailInput) emailInput.disabled = true;
+        if (pInput) pInput.disabled = true;
+        return true;
+      } else if (adminAuthState.lockoutUntil && now >= adminAuthState.lockoutUntil) {
+        adminAuthState.lockoutUntil = 0;
+        adminAuthState.failedAttempts = 0;
+        sessionStorage.removeItem('cf_admin_fail_count');
+        sessionStorage.removeItem('cf_admin_lockout_until');
+        clearInterval(adminAuthState.lockoutTimer);
+        adminAuthState.lockoutTimer = null;
+        if (errBanner) errBanner.style.display = 'none';
+        if (authBtn) {
+          authBtn.disabled = false;
+          authBtn.innerHTML = `<span>Authorize & Enter Admin Center</span> ${icons.arrowRight}`;
+        }
+        if (emailInput) emailInput.disabled = false;
+        if (pInput) pInput.disabled = false;
+      }
+      return false;
+    }
+
+    if (adminAuthState.lockoutUntil && Date.now() < adminAuthState.lockoutUntil) {
+      updateLockoutUI();
+      clearInterval(adminAuthState.lockoutTimer);
+      adminAuthState.lockoutTimer = setInterval(() => {
+        if (!updateLockoutUI()) {
+          clearInterval(adminAuthState.lockoutTimer);
+        }
+      }, 1000);
+    }
+
     document.getElementById('admin-login-form')?.addEventListener('submit', async (e) => {
       e.preventDefault();
+      if (updateLockoutUI()) {
+        showToast('Account is temporarily locked. Please wait.', icons.alertTriangle);
+        return;
+      }
+
       const email = document.getElementById('admin-email')?.value.trim();
-      const password = document.getElementById('admin-password')?.value.trim();
+      const password = document.getElementById('admin-password')?.value;
       const btn = document.getElementById('btn-admin-auth');
+      const errBanner = document.getElementById('admin-login-error-banner');
 
       if (btn) {
         btn.disabled = true;
-        btn.innerHTML = `<span>Verifying administrative authorization...</span>`;
+        btn.innerHTML = `<span>Verifying credentials...</span>`;
       }
 
       try {
-        let adminAuthorized = false;
-        let adminProfile = null;
-
-        if (supabaseClient) {
-          const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
-          if (error) throw new Error(error.message);
-
-          // Verify role-based authorization from Supabase profiles
-          const { data: prof, error: profErr } = await supabaseClient
-            .from('profiles')
-            .select('*')
-            .eq('id', data.user.id)
-            .single();
-
-          if (profErr || !prof || prof.role !== 'admin') {
-            await supabaseClient.auth.signOut();
-            throw new Error(`Access Denied: Account ${email} does not possess role = "admin" privileges.`);
-          }
-
-          adminAuthorized = true;
-          adminProfile = prof;
-        } else {
-          // Demo / Offline fallback verification
-          const res = ClientStore.adminLogin(email, password);
-          if (res && res.success) {
-            adminAuthorized = true;
-            adminProfile = res.user;
-          } else {
-            throw new Error(res.error || 'Invalid administrator credentials');
-          }
+        if (!supabaseClient) {
+          throw new Error('Backend auth service not configured. Please configure SUPABASE_URL and SUPABASE_ANON_KEY.');
         }
 
-        if (adminAuthorized && adminProfile) {
-          state.adminUser = adminProfile;
-          sessionStorage.setItem('jecrc_admin_user', JSON.stringify(adminProfile));
-          showToast('Authorized: JECRC Facilities Administrator', icons.check);
-          renderApp();
+        // Authenticate strictly against real backend auth service (Supabase)
+        const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+        if (error) {
+          // Generic message: never reveal whether email or password was wrong
+          throw new Error('Invalid credentials');
         }
+
+        // Verify role-based authorization from Supabase profiles table (backend enforced)
+        const { data: prof, error: profErr } = await supabaseClient
+          .from('profiles')
+          .select('*')
+          .eq('id', data.user.id)
+          .single();
+
+        if (profErr || !prof || prof.role !== 'admin') {
+          await supabaseClient.auth.signOut();
+          throw new Error('Access Denied: Account does not possess administrator privileges');
+        }
+
+        // Success: Reset failed attempts
+        adminAuthState.failedAttempts = 0;
+        adminAuthState.lockoutUntil = 0;
+        sessionStorage.removeItem('cf_admin_fail_count');
+        sessionStorage.removeItem('cf_admin_lockout_until');
+
+        state.adminUser = prof;
+        // Zero credentials stored in localStorage/sessionStorage/cookies/URLs. Auth session token is managed by Supabase SDK.
+        showToast('Authorized: JECRC Facilities Administrator', icons.check);
+        renderApp();
       } catch (err) {
-        showToast('Admin Gateway: ' + err.message, icons.alertTriangle);
+        let msg = 'Invalid credentials';
+        if (err.message && err.message.includes('administrator privileges')) {
+          msg = 'Access Denied: Account does not possess administrator privileges';
+        } else if (err.message && err.message.includes('Backend auth service not configured')) {
+          msg = err.message;
+        }
+
+        adminAuthState.failedAttempts++;
+        sessionStorage.setItem('cf_admin_fail_count', adminAuthState.failedAttempts);
+
+        if (adminAuthState.failedAttempts >= 5) {
+          adminAuthState.lockoutUntil = Date.now() + 60 * 1000;
+          sessionStorage.setItem('cf_admin_lockout_until', adminAuthState.lockoutUntil);
+          msg = 'Too many failed login attempts (5/5). Account temporarily locked for 60 seconds.';
+          updateLockoutUI();
+          clearInterval(adminAuthState.lockoutTimer);
+          adminAuthState.lockoutTimer = setInterval(() => {
+            if (!updateLockoutUI()) {
+              clearInterval(adminAuthState.lockoutTimer);
+            }
+          }, 1000);
+        } else {
+          msg = `${msg} (${adminAuthState.failedAttempts}/5 attempts)`;
+          if (errBanner) {
+            errBanner.style.display = 'block';
+            errBanner.innerText = msg;
+          }
+        }
+
+        showToast(msg, icons.alertTriangle);
       } finally {
-        if (btn) {
+        if (btn && (!adminAuthState.lockoutUntil || Date.now() >= adminAuthState.lockoutUntil)) {
           btn.disabled = false;
           btn.innerHTML = `<span>Authorize & Enter Admin Center</span> ${icons.arrowRight}`;
         }
@@ -2534,8 +2624,10 @@
       renderApp();
     });
 
-    document.getElementById('btn-admin-logout')?.addEventListener('click', () => {
-      sessionStorage.removeItem('jecrc_admin_user');
+    document.getElementById('btn-admin-logout')?.addEventListener('click', async () => {
+      if (supabaseClient) {
+        try { await supabaseClient.auth.signOut(); } catch (e) {}
+      }
       state.adminUser = null;
       showToast('Logged out from Admin Command Center');
       renderApp();

@@ -231,26 +231,30 @@ function initDatabase() {
 }
 
 function seedDatabase() {
-  // 1. Seed JECRC Admin user
+  // 1. Seed Initial Admin user only if configured via environment variables
   try {
-    const adminExists = db.prepare('SELECT * FROM users WHERE email = ?').get('admin@jecrcu.edu.in');
-    if (!adminExists) {
-      db.prepare(`
-        INSERT INTO users (name, email, role, roll_no, branch, hostel_or_day, phone, password_hash, verified, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        'JECRC Estate & Facilities Admin',
-        'admin@jecrcu.edu.in',
-        'admin',
-        'ADMIN-STAFF-01',
-        'Campus Facilities Office',
-        'Admin Block, 1st Floor',
-        '+91 141 2770200',
-        'jecrc@2026', // Plaintext for demonstration convenience
-        1,
-        new Date().toISOString()
-      );
-      console.log('Seeded JECRC University Admin (admin@jecrcu.edu.in / jecrc@2026)');
+    const adminEmail = process.env.ADMIN_INITIAL_EMAIL;
+    const adminPassword = process.env.ADMIN_INITIAL_PASSWORD;
+    if (adminEmail && adminPassword) {
+      const adminExists = db.prepare('SELECT * FROM users WHERE email = ?').get(adminEmail);
+      if (!adminExists) {
+        db.prepare(`
+          INSERT INTO users (name, email, role, roll_no, branch, hostel_or_day, phone, password_hash, verified, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          'JECRC Estate & Facilities Admin',
+          adminEmail,
+          'admin',
+          'ADMIN-STAFF-01',
+          'Campus Facilities Office',
+          'Admin Block, 1st Floor',
+          '+91 141 2770200',
+          adminPassword,
+          1,
+          new Date().toISOString()
+        );
+        console.log('Seeded initial admin user from environment variables.');
+      }
     }
   } catch (e) {
     console.warn('User seed note:', e.message);

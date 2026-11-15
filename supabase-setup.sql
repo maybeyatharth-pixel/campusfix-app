@@ -189,19 +189,11 @@ CREATE TRIGGER tr_handle_new_user
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
 -- ==============================================================================
--- 6. DEMO ACCOUNTS SETUP FOR PRESENTATION
--- Run the queries below after creating these users in:
--- Supabase Dashboard -> Authentication -> Users -> "Add User"
+-- 6. ADMIN ACCOUNT SETUP (Role-Based Access Control)
+-- To grant administrator privileges to an account:
+-- 1. Create the user in Supabase Dashboard -> Authentication -> Users -> "Add User"
+-- 2. Run the SQL query below with that user's email:
 --
--- Demo Admin:
---   Email: admin@jecrcu.edu.in
---   Password: [set your password e.g. jecrc@2026]
---
--- Demo Student:
---   Email: student@jecrcu.edu.in (or your own @jecrcu.edu.in email)
---   Password: [set your password or use email OTP]
+-- UPDATE public.profiles SET role = 'admin' WHERE email = '<ADMIN_EMAIL>';
+-- UPDATE auth.users SET raw_user_meta_data = raw_user_meta_data || '{"role": "admin"}'::jsonb WHERE email = '<ADMIN_EMAIL>';
 -- ==============================================================================
-
--- To make a user an administrator, run this with their email:
--- UPDATE public.profiles SET role = 'admin' WHERE email = 'admin@jecrcu.edu.in';
--- UPDATE auth.users SET raw_user_meta_data = raw_user_meta_data || '{"role": "admin"}'::jsonb WHERE email = 'admin@jecrcu.edu.in';
