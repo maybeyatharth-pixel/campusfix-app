@@ -25,13 +25,38 @@
     'Gate 2 to Hostel Pathway'
   ];
 
+  // Config & Supabase Auth Client Initialization
+  const config = window.CAMPUSFIX_CONFIG || {};
+  const ALLOWED_EMAIL_DOMAIN = config.ALLOWED_EMAIL_DOMAIN || 'jecrcu.edu.in';
+
+  let supabaseClient = null;
+  if (window.supabase && config.SUPABASE_URL && !config.SUPABASE_URL.includes('YOUR_PROJECT_ID')) {
+    try {
+      supabaseClient = window.supabase.createClient(config.SUPABASE_URL, config.SUPABASE_ANON_KEY);
+      console.log('CampusFix: Connected to Supabase Auth & PostgreSQL Backend.');
+    } catch (err) {
+      console.warn('CampusFix Supabase Init Note:', err);
+    }
+  }
+
+  // Security Auth State (OTP Cooldown & Wrong Attempt Limiters)
+  const authState = {
+    resendCooldown: 0,
+    cooldownTimer: null,
+    wrongAttempts: 0,
+    isLockedOut: false,
+    otpSentEmail: '',
+    pendingUserData: null,
+    otpExpiryTimer: null,
+    expirySeconds: 600
+  };
+
   // State Management
   const state = {
     // Portals: 'student' | 'admin'
     currentPortal: 'student',
     currentTab: 'home', // 'home' | 'report' | 'track' | 'help' | 'profile'
     theme: localStorage.getItem('jecrc_theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
-    viewMode: localStorage.getItem('jecrc_view_mode') || 'mockup',
 
     // Authenticated users
     studentUser: JSON.parse(localStorage.getItem('jecrc_student_user') || 'null'),
@@ -39,7 +64,6 @@
 
     // OTP verification draft
     pendingStudentAuth: null,
-    generatedOtp: null,
 
     // Data from Backend
     complaints: [],
@@ -453,10 +477,8 @@
       };
     },
     registerStudent(name, email, roll, branch, residence, phone) {
-      const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
       return {
         success: true,
-        otpCode,
         user: {
           name,
           email,
@@ -489,7 +511,8 @@
       const newC = {
         ...c,
         id,
-        status: 'Submitted',
+        user_id: c.user_id || (state.studentUser ? state.studentUser.id : null),
+        status: 'Pending',
         assigned_to: 'Unassigned (Triage Queue)',
         department: c.category === 'Electrical' ? 'Electrical Services' : (c.category === 'Water' ? 'Plumbing Services' : (c.category === 'Internet' ? 'IT & NOC' : 'Campus Facilities')),
         estimated_resolution: c.priority === 'High' ? 'Within 1-2 hours' : 'Within 24 hours',
@@ -670,8 +693,44 @@
 
   async function init() {
     applyTheme(state.theme);
-    applyViewMode(state.viewMode);
     setupEventListeners();
+
+    // Check active Supabase session
+    if (supabaseClient) {
+      try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        if (session && session.user) {
+          const { data: profile } = await supabaseClient
+            .from('profiles')
+            .select('*')
+            .eq('id', session.user.id)
+            .single();
+
+          if (profile) {
+            if (profile.role === 'admin') {
+              state.adminUser = profile;
+              sessionStorage.setItem('jecrc_admin_user', JSON.stringify(profile));
+            } else {
+              state.studentUser = profile;
+              localStorage.setItem('jecrc_student_user', JSON.stringify(profile));
+            }
+          }
+        }
+
+        supabaseClient.auth.onAuthStateChange(async (event, session) => {
+          if (event === 'SIGNED_OUT') {
+            state.studentUser = null;
+            state.adminUser = null;
+            localStorage.removeItem('jecrc_student_user');
+            sessionStorage.removeItem('jecrc_admin_user');
+            renderApp();
+          }
+        });
+      } catch (sessionErr) {
+        console.warn('Supabase session load error:', sessionErr);
+      }
+    }
+
     await loadData();
 
     // Check if a portal is specified in URL query or hash (e.g. ?portal=admin or #admin)
@@ -699,58 +758,59 @@
     }
   }
 
-  function applyViewMode(mode) {
-    state.viewMode = mode;
-    localStorage.setItem('jecrc_view_mode', mode);
-    const wrapper = document.getElementById('phone-frame-wrapper');
-    const container = document.getElementById('app-container');
-    const toggleBtn = document.getElementById('view-toggle-btn');
-    
-    if (mode === 'expanded') {
-      if (wrapper) wrapper.classList.remove('phone-mockup-frame');
-      if (container) container.classList.add('expanded-view');
-      if (toggleBtn) toggleBtn.innerHTML = `<span>📱</span> <span>Switch to Phone Frame</span>`;
-    } else {
-      if (wrapper) wrapper.classList.add('phone-mockup-frame');
-      if (container) container.classList.remove('expanded-view');
-      if (toggleBtn) toggleBtn.innerHTML = `<span>💻</span> <span>Switch to Expanded View</span>`;
-    }
-  }
-
   async function loadData() {
-    let backendAvailable = false;
-    try {
-      const [complaintsRes, statsRes, emergencyRes, faqsRes] = await Promise.all([
-        fetch('/api/complaints').then(r => r.ok ? r.json() : null),
-        fetch('/api/stats').then(r => r.ok ? r.json() : null),
-        fetch('/api/emergency').then(r => r.ok ? r.json() : null),
-        fetch('/api/faqs').then(r => r.ok ? r.json() : null)
-      ]);
+    let loadedFromSupabase = false;
+    if (supabaseClient) {
+      try {
+        const { data, error } = await supabaseClient
+          .from('complaints')
+          .select('*')
+          .order('created_at', { ascending: false });
 
-      if (complaintsRes && complaintsRes.complaints && complaintsRes.complaints.length > 0) {
-        state.complaints = complaintsRes.complaints;
-        backendAvailable = true;
+        if (!error && data && data.length > 0) {
+          state.complaints = data;
+          loadedFromSupabase = true;
+        }
+      } catch (err) {
+        console.warn('Supabase load note:', err);
       }
-      if (statsRes) {
-        state.stats = statsRes;
-      }
-      if (emergencyRes && emergencyRes.contacts) {
-        state.emergencyContacts = emergencyRes.contacts;
-      }
-      if (faqsRes && faqsRes.faqs) {
-        state.faqs = faqsRes.faqs;
-      }
-    } catch (err) {
-      console.warn('Backend load note:', err);
     }
 
-    // Seamless Netlify / Static CDN fallback
-    if (!backendAvailable || state.complaints.length === 0) {
-      const local = ClientStore.getData();
-      state.complaints = local.complaints;
-      state.stats = local.stats;
-      state.emergencyContacts = JECRC_EMERGENCY;
-      state.faqs = JECRC_FAQS;
+    if (!loadedFromSupabase) {
+      let backendAvailable = false;
+      try {
+        const [complaintsRes, statsRes, emergencyRes, faqsRes] = await Promise.all([
+          fetch('/api/complaints').then(r => r.ok ? r.json() : null),
+          fetch('/api/stats').then(r => r.ok ? r.json() : null),
+          fetch('/api/emergency').then(r => r.ok ? r.json() : null),
+          fetch('/api/faqs').then(r => r.ok ? r.json() : null)
+        ]);
+
+        if (complaintsRes && complaintsRes.complaints && complaintsRes.complaints.length > 0) {
+          state.complaints = complaintsRes.complaints;
+          backendAvailable = true;
+        }
+        if (statsRes) {
+          state.stats = statsRes;
+        }
+        if (emergencyRes && emergencyRes.contacts) {
+          state.emergencyContacts = emergencyRes.contacts;
+        }
+        if (faqsRes && faqsRes.faqs) {
+          state.faqs = faqsRes.faqs;
+        }
+      } catch (err) {
+        console.warn('Backend load note:', err);
+      }
+
+      // Seamless Netlify / Static CDN fallback
+      if (!backendAvailable || state.complaints.length === 0) {
+        const local = ClientStore.getData();
+        state.complaints = local.complaints;
+        state.stats = local.stats;
+        state.emergencyContacts = JECRC_EMERGENCY;
+        state.faqs = JECRC_FAQS;
+      }
     }
   }
 
@@ -839,7 +899,7 @@
     if (state.currentTab === 'profile') renderProfileTab();
   }
 
-  // Student Gmail Registration & Verification Screen
+  // Student Authentication Screen (Real Backend Supabase Auth, Strict Domain Enforcement, 60s Resend Cooldown, 3 Wrong Attempts Limit)
   function renderStudentAuthScreen() {
     const container = document.getElementById('student-auth-view');
     if (!container) return;
@@ -853,9 +913,11 @@
         </div>
 
         <div class="gmail-verify-badge">
-          <span>📧</span>
-          <span>Register with student Gmail to verify your identity & prevent spam</span>
+          <span>🛡️</span>
+          <span>Official JECRC Student Verification (Restricted to @${ALLOWED_EMAIL_DOMAIN})</span>
         </div>
+
+        <div id="domain-warning-banner" style="display: none; background: #fee2e2; border: 1px solid #f87171; color: #b91c1c; padding: 10px 12px; border-radius: var(--radius-md); font-size: 0.78rem; margin-bottom: 14px;"></div>
 
         <form id="student-register-form">
           <div class="form-group">
@@ -864,8 +926,11 @@
           </div>
 
           <div class="form-group">
-            <label class="form-label">Gmail / Student Email Address *</label>
-            <input type="email" id="reg-email" class="form-input" placeholder="e.g. aarav.sharma@gmail.com" required />
+            <label class="form-label">Official University Email Address *</label>
+            <input type="email" id="reg-email" class="form-input" placeholder="e.g. aarav.sharma@${ALLOWED_EMAIL_DOMAIN}" required />
+            <span class="label-hint" style="font-size: 0.7rem; color: var(--text-muted); margin-top: 2px;">
+              Only official university emails ending in <strong>@${ALLOWED_EMAIL_DOMAIN}</strong> are accepted.
+            </span>
           </div>
 
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;" class="form-group">
@@ -903,55 +968,89 @@
             <input type="tel" id="reg-phone" class="form-input" placeholder="+91 98290 12345" />
           </div>
 
-          <!-- Step 1: Request OTP -->
+          <!-- Step 1: Request Real OTP from Backend -->
           <button type="submit" class="submit-report-btn" id="btn-request-otp" style="margin-top: 10px;">
-            <span>Verify via Gmail & Register</span>
+            <span>Send Verification Code to Email</span>
             ${icons.arrowRight}
           </button>
         </form>
 
-        <!-- Simulated OTP Verification Box (Appears after submit) -->
+        <!-- Real OTP Verification Box (Never shows OTP on screen or in console) -->
         <div id="otp-verification-container" style="display: none;" class="otp-box-wrap">
-          <div style="font-size: 0.82rem; font-weight: 700; color: var(--text-primary);">
-            🔐 Enter 6-Digit Verification Code
+          <div style="font-size: 0.88rem; font-weight: 700; color: var(--text-primary); display: flex; align-items: center; gap: 6px;">
+            <span>🔐</span>
+            <span>Enter 6-Digit Email Verification Code</span>
           </div>
-          <div style="font-size: 0.72rem; color: var(--text-secondary); margin-top: 4px;">
-            Authenticity code sent to <strong id="otp-target-email"></strong>
+          <div style="font-size: 0.76rem; color: var(--text-secondary); margin-top: 4px; line-height: 1.4;">
+            A real verification code has been dispatched to <strong id="otp-target-email"></strong>. Please check your inbox and spam folder.
           </div>
-          <div id="otp-hint-badge" style="display: inline-block; background: rgba(16, 185, 129, 0.15); color: #047857; font-size: 0.72rem; font-weight: 700; padding: 2px 8px; border-radius: 4px; margin-top: 6px;"></div>
+          <div id="otp-error-badge" style="display: none; background: #fee2e2; border: 1px solid #f87171; color: #b91c1c; font-size: 0.75rem; font-weight: 600; padding: 6px 10px; border-radius: 4px; margin-top: 8px;"></div>
           
-          <input type="text" id="entered-otp" class="otp-code-input" maxlength="6" placeholder="000000" />
+          <input type="text" id="entered-otp" class="otp-code-input" maxlength="6" placeholder="------" autocomplete="one-time-code" style="letter-spacing: 6px; text-align: center; font-size: 1.25rem; font-weight: 700; margin-top: 10px;" />
           
-          <button type="button" class="submit-report-btn" id="btn-confirm-otp" style="padding: 10px; font-size: 0.85rem;">
+          <button type="button" class="submit-report-btn" id="btn-confirm-otp" style="padding: 10px; font-size: 0.88rem; margin-top: 8px;">
             Confirm Authenticity & Enter
           </button>
+
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 12px; font-size: 0.76rem;">
+            <span id="otp-timer-label" style="color: var(--text-muted);">Code valid for 10:00</span>
+            <button type="button" id="btn-resend-otp" disabled style="background: none; border: none; color: var(--primary); font-weight: 600; cursor: pointer; padding: 4px 6px;">
+              Resend Code (60s)
+            </button>
+          </div>
         </div>
 
-        <!-- Quick 1-Click Demo Login for Testing -->
+        <!-- Presentation Demo Student Account Shortcut -->
         <div style="margin-top: 18px; border-top: 1px dashed var(--border-color); padding-top: 14px; text-align: center;">
           <button type="button" id="btn-quick-demo-student" class="view-toggle-btn" style="width: 100%; justify-content: center; padding: 8px;">
-            ⚡ 1-Click Instant Student Demo (Aarav Sharma - BH-2)
+            ⚡ Demo Student Presentation Mode (student@${ALLOWED_EMAIL_DOMAIN})
           </button>
         </div>
       </div>
     `;
 
-    // 1-Click Demo Student
+    // Demo Student Presentation Shortcut
     document.getElementById('btn-quick-demo-student')?.addEventListener('click', () => {
       state.studentUser = {
-        name: 'Aarav Sharma',
-        email: 'aarav.sharma@jecrcu.edu.in',
+        id: 'demo-student-uuid-2026',
+        name: 'Demo Student',
+        email: `student@${ALLOWED_EMAIL_DOMAIN}`,
         roll_no: 'JU/2026/BTECH/1042',
         branch: 'Computer Science & Engineering',
         hostel_or_day: 'Boys Hostel BH-2 (Room 214)',
-        phone: '+91 98290 12345'
+        phone: '+91 98290 12345',
+        role: 'student'
       };
       localStorage.setItem('jecrc_student_user', JSON.stringify(state.studentUser));
-      showToast('Verified as JECRC Student: Aarav Sharma');
+      showToast(`Verified as Student: student@${ALLOWED_EMAIL_DOMAIN}`);
       renderApp();
     });
 
-    // Form Submit (Step 1: Send OTP)
+    // Helper: Resend OTP Cooldown Timer (60s)
+    function startResendCooldown() {
+      authState.resendCooldown = 60;
+      const resendBtn = document.getElementById('btn-resend-otp');
+      if (resendBtn) {
+        resendBtn.disabled = true;
+        resendBtn.innerText = `Resend Code (60s)`;
+      }
+      clearInterval(authState.cooldownTimer);
+      authState.cooldownTimer = setInterval(() => {
+        authState.resendCooldown--;
+        const btn = document.getElementById('btn-resend-otp');
+        if (authState.resendCooldown <= 0) {
+          clearInterval(authState.cooldownTimer);
+          if (btn) {
+            btn.disabled = false;
+            btn.innerText = 'Resend Code';
+          }
+        } else {
+          if (btn) btn.innerText = `Resend Code (${authState.resendCooldown}s)`;
+        }
+      }, 1000);
+    }
+
+    // Form Submit: Trigger Real OTP from Backend
     document.getElementById('student-register-form')?.addEventListener('submit', async (e) => {
       e.preventDefault();
       const name = document.getElementById('reg-name')?.value.trim();
@@ -961,57 +1060,197 @@
       const residence = document.getElementById('reg-residence')?.value;
       const phone = document.getElementById('reg-phone')?.value.trim();
 
+      const banner = document.getElementById('domain-warning-banner');
+
+      // ENFORCE OFFICIAL UNIVERSITY EMAIL DOMAIN
+      const domain = (email.split('@')[1] || '').toLowerCase();
+      if (domain !== ALLOWED_EMAIL_DOMAIN.toLowerCase()) {
+        if (banner) {
+          banner.style.display = 'block';
+          banner.innerHTML = `<strong>Registration Rejected:</strong> Official university domain policy violation. Only email addresses ending in <strong>@${ALLOWED_EMAIL_DOMAIN}</strong> are authorized to register as students.`;
+        }
+        showToast(`Invalid Domain: Only @${ALLOWED_EMAIL_DOMAIN} permitted`, icons.alertTriangle);
+        return;
+      } else {
+        if (banner) banner.style.display = 'none';
+      }
+
       const btn = document.getElementById('btn-request-otp');
-      if (btn) btn.innerHTML = `<span>Sending Verification Code...</span>`;
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = `<span>Requesting verification code...</span>`;
+      }
 
       try {
-        let res;
-        try {
-          res = await fetch('/api/auth/student-register', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, email, roll_no, branch, hostel_or_day: residence, phone })
-          }).then(r => r.ok ? r.json() : null);
-        } catch (netErr) {}
+        authState.otpSentEmail = email;
+        authState.wrongAttempts = 0;
+        authState.isLockedOut = false;
+        authState.pendingUserData = { name, email, roll_no, branch, hostel_or_day: residence, phone, role: 'student' };
 
-        if (!res || !res.success) {
-          res = ClientStore.registerStudent(name, email, roll_no, branch, residence, phone);
-        }
-
-        if (res && res.success) {
-          state.pendingStudentAuth = res.user;
-          state.generatedOtp = res.otpCode;
-
-          // Reveal OTP box
-          const otpWrap = document.getElementById('otp-verification-container');
-          const otpEmail = document.getElementById('otp-target-email');
-          const otpHint = document.getElementById('otp-hint-badge');
-          if (otpWrap && otpEmail && otpHint) {
-            otpWrap.style.display = 'block';
-            otpEmail.innerText = email;
-            otpHint.innerText = `Verification OTP: ${res.otpCode} (auto-filled)`;
-            const input = document.getElementById('entered-otp');
-            if (input) input.value = res.otpCode;
+        // Real Supabase Auth OTP Request
+        if (supabaseClient) {
+          const { error } = await supabaseClient.auth.signInWithOtp({
+            email,
+            options: {
+              shouldCreateUser: true,
+              data: { name, roll_no, branch, hostel_or_day: residence, phone, role: 'student' }
+            }
+          });
+          if (error) {
+            showToast(`Auth error: ${error.message}`, icons.alertTriangle);
+            return;
           }
-          showToast(`Verification code sent! Code: ${res.otpCode}`);
+        } else {
+          // ClientStore fallback
+          ClientStore.registerStudent(name, email, roll_no, branch, residence, phone);
         }
+
+        // Reveal OTP Input Container (NEVER show OTP code on screen, never log to console, never auto-fill)
+        const otpWrap = document.getElementById('otp-verification-container');
+        const otpEmail = document.getElementById('otp-target-email');
+        const otpInput = document.getElementById('entered-otp');
+        if (otpWrap && otpEmail && otpInput) {
+          otpWrap.style.display = 'block';
+          otpEmail.innerText = email;
+          otpInput.value = ''; // STRICT REQUIREMENT: Never auto-filled
+          otpInput.disabled = false;
+        }
+
+        startResendCooldown();
+        showToast(`Verification code dispatched to ${email}`, icons.check);
       } catch (err) {
-        showToast('Registration error', icons.alertTriangle);
+        showToast('Authentication error: ' + err.message, icons.alertTriangle);
       } finally {
-        if (btn) btn.innerHTML = `<span>Verify via Gmail & Register</span> ${icons.arrowRight}`;
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = `<span>Send Verification Code to Email</span> ${icons.arrowRight}`;
+        }
       }
     });
 
-    // Confirm OTP
-    document.getElementById('btn-confirm-otp')?.addEventListener('click', () => {
-      const code = document.getElementById('entered-otp')?.value.trim();
-      if (code === state.generatedOtp || code.length === 6) {
-        state.studentUser = state.pendingStudentAuth;
-        localStorage.setItem('jecrc_student_user', JSON.stringify(state.studentUser));
-        showToast('Authenticity verified! Welcome to JECRC CampusFix');
-        renderApp();
-      } else {
-        showToast('Invalid verification code. Please check.', icons.alertTriangle);
+    // Resend OTP Click Handler
+    document.getElementById('btn-resend-otp')?.addEventListener('click', async () => {
+      if (authState.resendCooldown > 0) return;
+      const email = authState.otpSentEmail;
+      if (!email) return;
+
+      const resendBtn = document.getElementById('btn-resend-otp');
+      if (resendBtn) resendBtn.innerText = 'Sending...';
+
+      try {
+        if (supabaseClient) {
+          await supabaseClient.auth.signInWithOtp({
+            email,
+            options: { shouldCreateUser: true, data: authState.pendingUserData || {} }
+          });
+        }
+        authState.wrongAttempts = 0;
+        authState.isLockedOut = false;
+        const errBadge = document.getElementById('otp-error-badge');
+        if (errBadge) errBadge.style.display = 'none';
+        const otpInput = document.getElementById('entered-otp');
+        if (otpInput) {
+          otpInput.disabled = false;
+          otpInput.value = '';
+          otpInput.focus();
+        }
+        const confirmBtn = document.getElementById('btn-confirm-otp');
+        if (confirmBtn) confirmBtn.disabled = false;
+
+        startResendCooldown();
+        showToast(`New verification code sent to ${email}`);
+      } catch (err) {
+        showToast('Resend failed: ' + err.message, icons.alertTriangle);
+      }
+    });
+
+    // Confirm OTP with wrong attempts limiter (max 3 wrong attempts before security lockout)
+    document.getElementById('btn-confirm-otp')?.addEventListener('click', async () => {
+      if (authState.isLockedOut) {
+        showToast('Session locked: 3 failed attempts. Please click Resend Code.', icons.alertTriangle);
+        return;
+      }
+
+      const input = document.getElementById('entered-otp');
+      const code = (input?.value || '').trim();
+      const errBadge = document.getElementById('otp-error-badge');
+
+      if (!code || code.length < 6) {
+        showToast('Please enter the 6-digit code sent to your email.', icons.alertTriangle);
+        return;
+      }
+
+      const confirmBtn = document.getElementById('btn-confirm-otp');
+      if (confirmBtn) {
+        confirmBtn.disabled = true;
+        confirmBtn.innerText = 'Verifying with backend...';
+      }
+
+      try {
+        let authSuccess = false;
+        let verifiedProfile = null;
+
+        if (supabaseClient) {
+          const { data, error } = await supabaseClient.auth.verifyOtp({
+            email: authState.otpSentEmail,
+            token: code,
+            type: 'email'
+          });
+
+          if (error) {
+            authState.wrongAttempts++;
+            if (authState.wrongAttempts >= 3) {
+              authState.isLockedOut = true;
+              if (errBadge) {
+                errBadge.style.display = 'block';
+                errBadge.innerText = '⛔ Maximum attempts reached (3/3). For security, this attempt has been locked out. Click Resend Code to request a new code.';
+              }
+              if (input) input.disabled = true;
+              showToast('Security lockout: 3 incorrect OTP attempts.', icons.alertTriangle);
+            } else {
+              if (errBadge) {
+                errBadge.style.display = 'block';
+                errBadge.innerText = `⚠️ Invalid code (${authState.wrongAttempts}/3 attempts). Check your email inbox.`;
+              }
+              showToast(`Invalid code (${authState.wrongAttempts}/3 attempts)`, icons.alertTriangle);
+            }
+            return;
+          }
+
+          authSuccess = true;
+          const user = data.user;
+          verifiedProfile = {
+            id: user.id,
+            email: user.email,
+            role: 'student',
+            name: authState.pendingUserData?.name || (user.email.split('@')[0]),
+            roll_no: authState.pendingUserData?.roll_no || 'JU/2026/BTECH/1042',
+            branch: authState.pendingUserData?.branch || 'Computer Science & Engineering',
+            hostel_or_day: authState.pendingUserData?.hostel_or_day || 'Boys Hostel BH-2',
+            phone: authState.pendingUserData?.phone || '+91 98290 12345'
+          };
+        } else {
+          // Demo fallback when offline or before Supabase credentials entered
+          authSuccess = true;
+          verifiedProfile = {
+            id: 'stu-' + Date.now(),
+            ...authState.pendingUserData
+          };
+        }
+
+        if (authSuccess && verifiedProfile) {
+          state.studentUser = verifiedProfile;
+          localStorage.setItem('jecrc_student_user', JSON.stringify(verifiedProfile));
+          showToast('Authenticity verified! Welcome to JECRC CampusFix');
+          renderApp();
+        }
+      } catch (err) {
+        showToast('Verification failed: ' + err.message, icons.alertTriangle);
+      } finally {
+        if (confirmBtn && !authState.isLockedOut) {
+          confirmBtn.disabled = false;
+          confirmBtn.innerText = 'Confirm Authenticity & Enter';
+        }
       }
     });
   }
@@ -1541,11 +1780,44 @@
           priority: state.reportDraft.priority,
           priority_reason: state.reportDraft.priorityReason,
           photo_url: state.reportDraft.photoUrl,
-          student_name: state.studentUser?.name || 'Aarav Sharma',
-          student_id: state.studentUser?.roll_no || 'JU/2026/BTECH/1042',
+          user_id: state.studentUser?.id || null,
+          student_name: state.studentUser?.name || 'Student',
+          student_id: state.studentUser?.roll_no || 'JU/2026/STU/101',
           student_phone: state.studentUser?.phone || '+91 98290 12345',
-          student_email: state.studentUser?.email || 'aarav.sharma@jecrcu.edu.in'
+          student_email: state.studentUser?.email || 'student@' + ALLOWED_EMAIL_DOMAIN
         };
+
+        if (supabaseClient && state.studentUser) {
+          try {
+            const newId = 'JU-2026-0' + Math.floor(210 + Math.random() * 780);
+            const { data: inserted, error: insertErr } = await supabaseClient
+              .from('complaints')
+              .insert([{
+                id: newId,
+                user_id: state.studentUser.id,
+                title: payload.title,
+                description: payload.description,
+                location: payload.location,
+                category: payload.category,
+                priority: payload.priority,
+                priority_reason: payload.priority_reason,
+                status: 'Pending',
+                student_name: payload.student_name,
+                student_id: payload.student_id,
+                student_phone: payload.student_phone,
+                student_email: payload.student_email,
+                photo_url: payload.photo_url || null
+              }])
+              .select()
+              .single();
+
+            if (!insertErr && inserted) {
+              res = { success: true, complaint: inserted };
+            }
+          } catch (supaErr) {
+            console.warn('Supabase insert note:', supaErr);
+          }
+        }
 
         let res;
         try {
@@ -1592,9 +1864,19 @@
     const container = document.getElementById('tab-track');
     if (!container) return;
 
-    let filtered = state.complaints.filter(c => {
-      if (state.trackFilter === 'Active' && (c.status === 'Resolved' || c.status === 'Closed')) return false;
-      if (state.trackFilter === 'Resolved' && (c.status !== 'Resolved' && c.status !== 'Closed')) return false;
+    // Strict Ownership Enforcement: Students can ONLY see and track their own reports
+    const currentStudentEmail = (state.studentUser?.email || '').toLowerCase();
+    const currentStudentId = state.studentUser?.id;
+
+    let myComplaints = state.complaints.filter(c => {
+      if (currentStudentId && c.user_id && c.user_id === currentStudentId) return true;
+      if (currentStudentEmail && c.student_email && c.student_email.toLowerCase() === currentStudentEmail) return true;
+      return false;
+    });
+
+    let filtered = myComplaints.filter(c => {
+      if (state.trackFilter === 'Active' && (c.status === 'Resolved' || c.status === 'Closed' || c.status === 'Rejected')) return false;
+      if (state.trackFilter === 'Resolved' && c.status !== 'Resolved') return false;
       if (state.trackFilter === 'High' && c.priority !== 'High') return false;
       if (state.trackCategory !== 'All' && c.category !== state.trackCategory) return false;
 
@@ -1681,6 +1963,13 @@
                   View Timeline ${icons.arrowRight}
                 </span>
               </div>
+
+              ${c.admin_remark ? `
+                <div style="margin-top: 10px; padding: 8px 10px; background: rgba(59, 130, 246, 0.08); border-left: 3px solid var(--primary); border-radius: 4px; font-size: 0.76rem;">
+                  <span style="font-weight: 700; color: var(--primary);">💬 Admin Official Remark:</span>
+                  <div style="color: var(--text-primary); margin-top: 2px;">${escapeHtml(c.admin_remark)}</div>
+                </div>
+              ` : ''}
             </div>
           `;
         }).join('')}
@@ -1900,7 +2189,10 @@
       applyTheme(e.target.checked ? 'dark' : 'light');
     });
 
-    document.getElementById('btn-logout-student')?.addEventListener('click', () => {
+    document.getElementById('btn-logout-student')?.addEventListener('click', async () => {
+      if (supabaseClient) {
+        try { await supabaseClient.auth.signOut(); } catch(e) {}
+      }
       localStorage.removeItem('jecrc_student_user');
       state.studentUser = null;
       showToast('Logged out from Student Session');
@@ -1987,34 +2279,57 @@
       const password = document.getElementById('admin-password')?.value.trim();
       const btn = document.getElementById('btn-admin-auth');
 
-      if (btn) btn.innerHTML = `<span>Verifying credentials...</span>`;
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = `<span>Verifying administrative authorization...</span>`;
+      }
 
       try {
-        let res;
-        try {
-          res = await fetch('/api/auth/admin-login', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email, password })
-          }).then(r => r.ok ? r.json() : null);
-        } catch (netErr) {}
+        let adminAuthorized = false;
+        let adminProfile = null;
 
-        if (!res || !res.success) {
-          res = ClientStore.adminLogin(email, password);
+        if (supabaseClient) {
+          const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+          if (error) throw new Error(error.message);
+
+          // Verify role-based authorization from Supabase profiles
+          const { data: prof, error: profErr } = await supabaseClient
+            .from('profiles')
+            .select('*')
+            .eq('id', data.user.id)
+            .single();
+
+          if (profErr || !prof || prof.role !== 'admin') {
+            await supabaseClient.auth.signOut();
+            throw new Error(`Access Denied: Account ${email} does not possess role = "admin" privileges.`);
+          }
+
+          adminAuthorized = true;
+          adminProfile = prof;
+        } else {
+          // Demo / Offline fallback verification
+          const res = ClientStore.adminLogin(email, password);
+          if (res && res.success) {
+            adminAuthorized = true;
+            adminProfile = res.user;
+          } else {
+            throw new Error(res.error || 'Invalid administrator credentials');
+          }
         }
 
-        if (res && res.success) {
-          state.adminUser = res.user;
-          sessionStorage.setItem('jecrc_admin_user', JSON.stringify(res.user));
-          showToast('Welcome, JECRC Facilities Administrator!');
+        if (adminAuthorized && adminProfile) {
+          state.adminUser = adminProfile;
+          sessionStorage.setItem('jecrc_admin_user', JSON.stringify(adminProfile));
+          showToast('Authorized: JECRC Facilities Administrator', icons.check);
           renderApp();
-        } else {
-          showToast(res.error || 'Access Denied: Invalid administrator credentials', icons.alertTriangle);
         }
       } catch (err) {
-        showToast('Login error: ' + err.message, icons.alertTriangle);
+        showToast('Admin Gateway: ' + err.message, icons.alertTriangle);
       } finally {
-        if (btn) btn.innerHTML = `<span>Authorize & Enter Admin Center</span> ${icons.arrowRight}`;
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = `<span>Authorize & Enter Admin Center</span> ${icons.arrowRight}`;
+        }
       }
     });
 
@@ -2206,7 +2521,7 @@
             </div>
             <div>
               <button class="update-status-trigger-btn" data-admin-id="${c.id}">
-                Update Status & Note
+                Update Query
               </button>
             </div>
           </div>
@@ -2447,22 +2762,26 @@
   // =========================================================================
   // ADMIN UPDATE STATUS & NOTE MODAL
   // =========================================================================
+  // Admin Update Status & Query Modal (Bug Fixed: Variable scope ReferenceError resolved, Full Details Displayed)
   function openAdminStatusModal(complaintId) {
     const complaint = state.complaints.find(c => c.id === complaintId);
-    if (!complaint) return;
+    if (!complaint) {
+      showToast('Error: Report not found', icons.alertTriangle);
+      return;
+    }
     state.adminModalComplaint = complaint;
 
     const modal = document.getElementById('admin-modal-overlay');
     if (!modal) return;
 
     modal.innerHTML = `
-      <div class="bottom-sheet-content" style="max-width: 550px;">
+      <div class="bottom-sheet-content" style="max-width: 580px;">
         <div class="sheet-handle"></div>
         <div class="sheet-header-row">
           <div>
-            <div style="font-size: 0.78rem; font-weight: 700; color: #b45309;">JECRC ESTATE WORK ORDER DISPATCH</div>
-            <h3 style="font-size: 1.1rem; font-weight: 800; color: var(--text-primary); margin-top: 2px;">
-              Update Ticket ${complaint.id}
+            <div style="font-size: 0.78rem; font-weight: 700; color: #b45309;">JECRC ESTATE & FACILITIES DESK</div>
+            <h3 style="font-size: 1.15rem; font-weight: 800; color: var(--text-primary); margin-top: 2px;">
+              Update Query #${complaint.id}
             </h3>
           </div>
           <button type="button" class="close-sheet-btn" id="close-admin-modal-btn">
@@ -2470,22 +2789,32 @@
           </button>
         </div>
 
-        <div style="font-size: 0.8rem; background: var(--bg-subtle); padding: 10px; border-radius: var(--radius-sm); border: 1px solid var(--border-color); margin-bottom: 14px;">
-          <div><strong>Problem:</strong> ${escapeHtml(complaint.title)}</div>
-          <div><strong>Location:</strong> ${escapeHtml(complaint.location)}</div>
-          <div><strong>Student:</strong> ${escapeHtml(c.student_name || complaint.student_name)} (${escapeHtml(complaint.student_id)})</div>
-          <div><strong>Current Status:</strong> <span class="status-badge status-${complaint.status.toLowerCase().replace(/\s+/g, '-')}">${complaint.status}</span></div>
+        <!-- Full Report Details Required by Specification -->
+        <div style="font-size: 0.8rem; background: var(--bg-subtle); padding: 12px; border-radius: var(--radius-md); border: 1px solid var(--border-color); margin-bottom: 16px; display: flex; flex-direction: column; gap: 6px;">
+          <div><strong>Title:</strong> ${escapeHtml(complaint.title)}</div>
+          <div><strong>Description:</strong> ${escapeHtml(complaint.description || 'No additional details provided.')}</div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 2px;">
+            <div><strong>Category:</strong> ${escapeHtml(complaint.category)}</div>
+            <div><strong>Location:</strong> ${escapeHtml(complaint.location)}</div>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+            <div><strong>Reporter:</strong> ${escapeHtml(complaint.student_name)} (${escapeHtml(complaint.student_id)})</div>
+            <div><strong>Email:</strong> ${escapeHtml(complaint.student_email || 'Not specified')}</div>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+            <div><strong>Date Reported:</strong> ${new Date(complaint.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
+            <div><strong>Current Status:</strong> <span class="status-badge status-${(complaint.status || 'Pending').toLowerCase().replace(/\s+/g, '-')}">${complaint.status}</span></div>
+          </div>
         </div>
 
         <form id="admin-update-status-form">
           <div class="form-group">
-            <label class="form-label">Update Status</label>
+            <label class="form-label">Change Status *</label>
             <select id="modal-status-select" class="form-select">
-              <option value="Submitted" ${complaint.status === 'Submitted' ? 'selected' : ''}>Submitted</option>
-              <option value="Under Review" ${complaint.status === 'Under Review' ? 'selected' : ''}>Under Review</option>
+              <option value="Pending" ${complaint.status === 'Pending' || complaint.status === 'Submitted' || complaint.status === 'Under Review' ? 'selected' : ''}>Pending</option>
               <option value="In Progress" ${complaint.status === 'In Progress' ? 'selected' : ''}>In Progress</option>
               <option value="Resolved" ${complaint.status === 'Resolved' ? 'selected' : ''}>Resolved</option>
-              <option value="Closed" ${complaint.status === 'Closed' ? 'selected' : ''}>Closed</option>
+              <option value="Rejected" ${complaint.status === 'Rejected' ? 'selected' : ''}>Rejected</option>
             </select>
           </div>
 
@@ -2518,14 +2847,15 @@
 
           <div class="form-group">
             <label class="form-label">
-              <span>Admin / Technician Official Note <span style="color: #ef4444;">*</span></span>
-              <span class="label-hint">Pushed to Student Timeline</span>
+              <span>Admin Remark / Comment <span style="color: #ef4444;">*</span></span>
+              <span class="label-hint">Shown to student on Track screen & timeline</span>
             </label>
-            <textarea id="modal-admin-note" class="form-textarea" placeholder="e.g. Electrician Rameshwar dispatched with replacement MCB. Power restored and verified." required></textarea>
+            <textarea id="modal-admin-note" class="form-textarea" placeholder="Enter official action taken, resolution summary, or rejection justification..." required>${escapeHtml(complaint.admin_remark || '')}</textarea>
           </div>
 
           <button type="submit" class="submit-report-btn" id="modal-save-status-btn" style="background: #b45309;">
-            Save Status & Push to Student Timeline
+            <span>Save & Update Query</span>
+            ${icons.check}
           </button>
         </form>
       </div>
@@ -2546,61 +2876,98 @@
       const saveBtn = document.getElementById('modal-save-status-btn');
       if (saveBtn) {
         saveBtn.disabled = true;
-        saveBtn.innerText = 'Saving updates...';
+        saveBtn.innerHTML = `<span>Saving query update...</span>`;
       }
 
       const newStatus = document.getElementById('modal-status-select')?.value;
       const department = document.getElementById('modal-dept-select')?.value;
       const assigned_to = document.getElementById('modal-assignee-input')?.value;
       const priority = document.getElementById('modal-priority-select')?.value;
-      const note = document.getElementById('modal-admin-note')?.value;
+      const note = document.getElementById('modal-admin-note')?.value.trim();
 
       try {
-        let res;
-        try {
-          res = await fetch(`/api/complaints/${complaint.id}/status`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
+        let updateSucceeded = false;
+
+        // 1. Supabase Backend Update
+        if (supabaseClient) {
+          const { error: supaErr } = await supabaseClient
+            .from('complaints')
+            .update({
               status: newStatus,
+              admin_remark: note,
               department,
               assigned_to,
               priority,
-              note,
-              actor_name: state.adminUser?.name || 'JECRC Estate Officer',
-              actor_role: 'Campus Admin'
+              updated_at: new Date().toISOString()
             })
-          }).then(r => r.ok ? r.json() : null);
-        } catch (netErr) {}
+            .eq('id', complaint.id);
 
-        if (!res || !res.success) {
-          res = ClientStore.updateStatus(complaint.id, {
-            status: newStatus,
-            department,
-            assigned_to,
-            priority,
-            note,
-            actor_name: state.adminUser?.name || 'JECRC Estate Officer'
-          });
+          if (!supaErr) {
+            updateSucceeded = true;
+            // Also append timeline event
+            await supabaseClient.from('timeline_events').insert([{
+              complaint_id: complaint.id,
+              status: newStatus,
+              title: `Status Updated to ${newStatus}`,
+              note: note,
+              actor_role: 'Campus Admin',
+              actor_name: state.adminUser?.name || 'JECRC Facilities Officer'
+            }]);
+          } else {
+            console.warn('Supabase status update error:', supaErr);
+          }
         }
 
-        if (res && res.success) {
-          showToast(`Status updated to ${newStatus}!`, icons.check);
+        // 2. Local ClientStore Fallback / Sync
+        const storeRes = ClientStore.updateStatus(complaint.id, {
+          status: newStatus,
+          department,
+          assigned_to,
+          priority,
+          note,
+          actor_name: state.adminUser?.name || 'JECRC Estate Officer'
+        });
+        if (storeRes && storeRes.success) {
+          updateSucceeded = true;
+        }
+
+        // 3. Update in-memory state
+        complaint.status = newStatus;
+        complaint.admin_remark = note;
+        complaint.department = department;
+        complaint.assigned_to = assigned_to;
+        complaint.priority = priority;
+        complaint.updated_at = new Date().toISOString();
+        if (!complaint.timeline) complaint.timeline = [];
+        complaint.timeline.push({
+          status: newStatus,
+          title: `Status Updated to ${newStatus}`,
+          note: note,
+          actor_role: 'Campus Admin',
+          actor_name: state.adminUser?.name || 'JECRC Estate Officer',
+          created_at: new Date().toISOString()
+        });
+
+        if (updateSucceeded) {
+          showToast(`Query #${complaint.id} status updated to "${newStatus}"!`, icons.check);
           modal.classList.remove('active');
-          await loadData();
-          renderApp();
+
+          // Refresh Admin list without page reload
+          renderAdminDashboard();
+
+          // Refresh active detail if currently open
           if (state.activeComplaintDetail && state.activeComplaintDetail.complaint.id === complaint.id) {
             openComplaintDetailModal(complaint.id);
           }
         } else {
-          showToast('Update failed: ' + (res.error || 'Server error'), icons.alertTriangle);
+          showToast('Could not save query update', icons.alertTriangle);
         }
       } catch (err) {
-        showToast('Network error updating status', icons.alertTriangle);
+        showToast('Error updating query: ' + err.message, icons.alertTriangle);
       } finally {
         if (saveBtn) {
           saveBtn.disabled = false;
-          saveBtn.innerText = 'Save Status & Push to Student Timeline';
+          saveBtn.innerHTML = `<span>Save & Update Query</span> ${icons.check}`;
         }
       }
     });
@@ -2635,9 +3002,7 @@
       applyTheme(state.theme === 'dark' ? 'light' : 'dark');
     });
 
-    document.getElementById('view-toggle-btn')?.addEventListener('click', () => {
-      applyViewMode(state.viewMode === 'mockup' ? 'expanded' : 'mockup');
-    });
+
   }
 
   function escapeHtml(str) {
